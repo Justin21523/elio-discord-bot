@@ -1,0 +1,23 @@
+{
+  "name": "communiverse-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node src/index.js",
+    "deploy:dev": "node scripts/deploy-commands.js",
+    "seed:media": "node scripts/seed-media.js",
+    "seed:greetings": "node scripts/seed-greetings.js",
+    "seed:scenarios": "node scripts/seed-scenarios.js",
+    "seed:personas": "node scripts/seed-personas.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "mongodb": "^6.9.0",
+    "node-cron": "^3.0.3"
+  }
+}

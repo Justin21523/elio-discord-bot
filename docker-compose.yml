@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    # no container_name -> will be <project>_mongo_1; avoids clash with any existing "mongo"
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: dev
+      MONGO_INITDB_ROOT_PASSWORD: devpass
+    volumes:
+      - mongo_data:/data/db
+    command: ["--auth"]
+
+  bot:
+    build: .
+    # no container_name -> <project>_bot_1
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    env_file:
+      - ./.env
+    environment:
+      # Inside compose network, connect to "mongo:27017" instead of localhost
+      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
+      DB_NAME: ${DB_NAME:-communiverse_bot}
+
+volumes:
+  mongo_data:
