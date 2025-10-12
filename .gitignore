@@ -1,0 +1,44 @@
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+yarn.lock
+package-lock.json
+
+# Env & secrets
+.env
+.env.*.local
+
+# Logs
+logs
+*.log
+*.log.*
+pids
+*.pid
+*.seed
+
+# Editor/OS
+.DS_Store
+.vscode/
+.idea/
+
+# Build outputs
+dist/
+coverage/
+.tmp/
+.cache/
+
+# Docker
+docker-compose.override.yml
+*.local.yml
+
+# Mongo local data
+.mongo-data/
+data/db/
+dump/
+backup/
+
+# Misc
+*.swp
+*.swo
+Thumbs.db
