@@ -87,21 +87,21 @@ export function getDb() {
   return state.db;
 }
 
+/** for tests/tools */
 export function collections() {
-  if (!db) throw new Error("Mongo not connected");
+  const db = getDb();
   return {
     media: db.collection("media"),
     schedules: db.collection("schedules"),
     profiles: db.collection("profiles"),
     games: db.collection("games"),
-    // Phase A
     greetings: db.collection("greetings"),
     scenarios: db.collection("scenarios"),
     scenario_sessions: db.collection("scenario_sessions"),
     scenario_answers: db.collection("scenario_answers"),
     personas: db.collection("personas"),
-    persona_affinity: db.collection("persona_affinity"),
     persona_config: db.collection("persona_config"),
+    persona_affinity: db.collection("persona_affinity"),
   };
 }
 
