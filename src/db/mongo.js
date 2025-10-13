@@ -18,24 +18,25 @@ export async function connectMongo() {
   state.client = client;
   state.db = db;
 
+  // ── Ensure indexes, but be tolerant when collections don't exist yet ──
+  const safeDropIndex = async (col, name) => {
+    try { await col.dropIndex(name); }
+    catch (e) {
+      if (!['IndexNotFound', 'NamespaceNotFound'].includes(e?.codeName) && e?.code !== 27) throw e;
+    }
+  };
+
   // --- Core indexes for existing features ---
   await Promise.all([
-    db.collection("media").createIndex({ enabled: 1, nsfw: 1 }),
-    // MIGRATION: ensure schedules unique on (guildId, kind). Drop legacy unique on guildId if exists.
+    db.collection('media').createIndex({ enabled: 1, nsfw: 1 }),
     (async () => {
-      const idx = await db.collection("schedules").indexes();
-      const legacy = idx.find((i) => i.name === "guildId_1" && i.unique);
-      if (legacy) {
-        try {
-          await db.collection("schedules").dropIndex("guildId_1");
-        } catch {}
-      }
-      await db
-        .collection("schedules")
-        .createIndex({ guildId: 1, kind: 1 }, { unique: true });
+      const col = db.collection('schedules');
+      await safeDropIndex(col, 'guildId_1');
+      await col.createIndex({ guildId: 1, kind: 1 }, { unique: true });
     })(),
-    db.collection("profiles").createIndex({ guildId: 1, points: -1 }),
-    db.collection("games").createIndex({ guildId: 1, status: 1 }),
+    db.collection('profiles').createIndex({ guildId: 1, points: -1 }),
+    db.collection('games').createIndex({ guildId: 1, status: 1 }),
+    db.collection('scenario_answers').createIndex({ sessionId: 1, userId: 1 }, { unique: true })
   ]);
 
   // --- New collections & indexes for Phase A ---
@@ -106,13 +107,10 @@ export function collections() {
 }
 
 export async function closeMongo() {
-  try {
-    if (client) await client.close(true);
-    console.log("[INT] Mongo closed");
-  } catch (e) {
-    console.error("[ERR] Mongo close failed:", e);
-  } finally {
-    client = undefined;
-    db = undefined;
+  if (state.client) {
+    await state.client.close();
+    state.client = null;
+    state.db = null;
+    console.log('[INT] Mongo closed');
   }
 }

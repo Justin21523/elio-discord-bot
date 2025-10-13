@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   mongo:
     image: mongo:7
@@ -11,7 +9,12 @@ services:
       MONGO_INITDB_ROOT_USERNAME: dev
       MONGO_INITDB_ROOT_PASSWORD: devpass
     volumes:
-      - mongo_data:/data/db
+      - ./.mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok" ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     command: ["--auth"]
 
   bot:
@@ -21,11 +24,23 @@ services:
     depends_on:
       - mongo
     env_file:
-      - ./.env
+      - .env
     environment:
       # Inside compose network, connect to "mongo:27017" instead of localhost
       MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
       DB_NAME: ${DB_NAME:-communiverse_bot}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('net').connect(443,'discord.com').on('connect',()=>{console.log('ok');process.exit(0)}).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
 
 volumes:
   mongo_data:

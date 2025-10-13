@@ -20,6 +20,11 @@ export async function startSession(
 ) {
   const { scenarios, scenario_sessions } = collections();
 
+  const pool = await scenarios.find({ enabled: true }).toArray();
+  if (!pool.length) {
+    return { ok: false, message: "No scenarios in the database. Run the seed or add some first." };
+  }
+
   const match = { enabled: { $ne: false } };
   if (tag) match.tags = { $in: [tag] };
   const arr = await scenarios

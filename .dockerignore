@@ -1,8 +1,8 @@
 node_modules
-npm-debug.log
 .git
 .gitignore
 Dockerfile*
-docker-compose*.yml
-data
+docker-compose.yml
 .env
+.env.*
+*.log

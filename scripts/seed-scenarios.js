@@ -13,38 +13,48 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectMongo, closeMongo, getDb } from "../src/db/mongo.js";
+import { connectMongo, closeMongo, getDb, collections } from "../src/db/mongo.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
   await connectMongo();
-  const db = getDb();
-  const col = db.collection("scenarios");
+  const { scenarios } = collections();
 
-  const docs = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "../data/scenarios.json"), "utf-8")
-  );
-  for (const s of docs) {
-    await col.updateOne(
-      { prompt: s.prompt },
-      {
-        $set: {
-          prompt: s.prompt,
-          options: s.options,
-          correctIndex: s.correctIndex,
-          tags: s.tags || [],
-          hostPersonaName: s.hostPersonaName || null,
-          enabled: s.enabled !== false,
-        },
-      },
-      { upsert: true }
-    );
+  // Locate data/scenarios.json regardless of CWD
+  const dataPath = path.resolve(__dirname, "../data/scenarios.json");
+  if (!fs.existsSync(dataPath)) {
+    throw new Error(`Data file not found: ${dataPath}`);
   }
-  console.log("[INT] scenarios inserted:", docs.length);
-  await closeMongo();
+  const raw = fs.readFileSync(dataPath, "utf8");
+  const json = JSON.parse(raw);
+
+  const list = Array.isArray(json) ? json : (Array.isArray(json.scenarios) ? json.scenarios : []);
+  if (!list.length) throw new Error("No scenarios found in data/scenarios.json");
+
+
+  // Minimal normalize
+  const docs = list.map((s) => ({
+    prompt: s.prompt,
+    options: s.options,
+    correctIndex: Number.isInteger(s.correctIndex) ? s.correctIndex : (Number.isInteger(s.answer) ? s.answer : 0),
+    host: s.host || s.persona || "Elio",
+    tags: s.tags || [],
+    enabled: s.enabled ?? true,
+    createdAt: new Date(),
+  }));
+
+  await scenarios.deleteMany({});
+  const { insertedCount } = await scenarios.insertMany(docs);
+  console.log(`[INT] scenarios inserted: ${insertedCount}`);
 }
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+
+main()
+  .catch((e) => {
+    console.error("[ERR] seed-scenarios failed:", e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await closeMongo();
+  });
