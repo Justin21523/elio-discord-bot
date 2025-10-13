@@ -25,56 +25,24 @@ docker run -d --name mongo \
   -e MONGO_INITDB_ROOT_USERNAME=dev \
   -e MONGO_INITDB_ROOT_PASSWORD=devpass \
   mongo:7 --auth
-````
+```
 
 Set `.env` → `MONGODB_URI=mongodb://dev:devpass@127.0.0.1:27017/?authSource=admin`
 
 > On WSL, prefer WSL2 and run Node inside WSL. If your repo is under `/mnt/c/...`, installation works but is slower.
 
-````
+## Seed & Persona/Scenario visuals
 
----
+This repo ships JSON seeds under `data/`:
 
-# 🧪 手動測試計畫（簡版）
+- `data/personas.json` — now includes per-persona `avatar` (URL) and `color` (decimal int).
+- `data/scenarios.json` — each scenario may define `hostPersonaName` so reveals are announced by that persona via webhook.
+- `data/greetings.json` / `data/media.json` — optional, for greetings and media pool.
 
-1. **部署指令**
-   ```bash
-   npm run deploy:dev
-````
+Run seeds:
 
-看到 `[CMD] Registered guild commands` 即可。
-
-2. **啟動 bot**
-
-   ```bash
-   npm run dev
-   ```
-
-   看到：
-
-   * `[INT] Logged in as ...`
-   * `[INT] Mongo connected -> communiverse_bot`
-   * `[INT] Scheduler armed from DB`
-
-3. **塞資料**
-
-   ```bash
-   npm run seed:media
-   ```
-
-4. **在公開頻道測試**
-
-   * `/drop now` → 只會看到 **非 NSFW** 的 media。
-   * `/drop set time: 25:99` → 應回「Invalid time…」
-   * `/drop set time: 09:30` → 回覆已排程。
-
-5. **在 NSFW 頻道測試**
-
-   * `/drop now` → 有機率丟 **NSFW** 的 media。
-
-6. **遊戲**
-
-   * `/game start` → 第一個點按鈕者獲勝，+10 分；
-   * `/game leaderboard` → 顯示分數與等級。
-
----
+```bash
+npm run seed:personas
+npm run seed:scenarios
+npm run seed:greetings   # optional
+npm run seed:media       # optional
