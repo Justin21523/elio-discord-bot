@@ -12,59 +12,80 @@
  *   "cooldownSeconds": 180
  * }
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { connectMongo, closeMongo, getDb } from "../src/db/mongo.js";
+import dotenv from 'dotenv';
+import { MongoClient } from 'mongodb';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config();
 
-async function main() {
-  await connectMongo();
-  const db = getDb();
-  const personasCol = db.collection("personas");
-  const configCol = db.collection("persona_config");
-
-  const raw = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "../data/personas.json"), "utf-8")
-  );
-  const { personas, actions, config } = raw;
-
-  for (const p of personas) {
-    await personasCol.updateOne(
-      { name: p.name },
-      {
-        $set: {
-          name: p.name,
-          avatar: p.avatar || null,
-          color: Number.isFinite(p.color) ? p.color : null,
-          traits: p.traits || {},
-          likes: p.likes || [],
-          dislikes: p.dislikes || [],
-          openers: p.openers || [],
-          enabled: true,
-        },
-      },
-      { upsert: true }
-    );
-  }
-
-  await configCol.updateOne(
-    { _id: "global" },
+const personas = {
+  "personas": [
     {
-      $set: {
-        actions,
-        cooldownSeconds: config?.cooldownSeconds ?? 180,
-        modifiers: config?.modifiers ?? [],
-      },
+      "name": "Elio",
+      "avatar": "https://placehold.co/256x256/png?text=Elio",
+      "color": 15844367,
+      "traits": { "humor": 0.6, "warmth": 0.95, "discipline": 0.5 },
+      "likes": ["gentleness", "honesty", "small wins"],
+      "dislikes": ["mockery", "needless drama"],
+      "openers": [
+        "Hey, you made it. That already counts.",
+        "Deep breath—want a soft start today?"
+      ]
     },
-    { upsert: true }
-  );
+    {
+      "name": "Glordon",
+      "avatar": "https://placehold.co/256x256/png?text=Glordon",
+      "color": 3447003,
+      "traits": { "humor": 0.85, "warmth": 0.8, "discipline": 0.2 },
+      "likes": ["jokes", "learning", "being included"],
+      "dislikes": ["being shushed", "complicated metaphors"],
+      "openers": [
+        "Hello! Do humans always greet potatoes first?",
+        "I brought enthusiasm. Is that a resource?"
+      ]
+    },
+    {
+      "name": "Caleb",
+      "avatar": "https://placehold.co/256x256/png?text=Caleb",
+      "likes": ["results", "clear plans", "quiet"],
+      "dislikes": ["wasting time", "vague talk"],
+      "openers": [
+        "You need something or just passing by?",
+        "If we do this, we do it right."
+      ]
+    }
+  ],
+};
 
-  console.log("[INT] personas upserted:", personas.length, ", config saved");
-  await closeMongo();
+async function seed() {
+  const client = new MongoClient(process.env.MONGODB_URI);
+
+  try {
+    await client.connect();
+    console.log('✅ Connected to MongoDB');
+
+    const db = client.db(process.env.DB_NAME || 'communiverse_bot');
+    const collection = db.collection('personas');
+
+    // Clear existing
+    await collection.deleteMany({});
+    console.log('🗑️  Cleared existing personas');
+
+    // Insert
+    const result = await collection.insertMany(personas);
+    console.log(`✅ Inserted ${result.insertedCount} personas`);
+
+    // List
+    const all = await collection.find({}).toArray();
+    console.log('\n📋 Personas in database:');
+    all.forEach(p => console.log(`  - ${p.name} (humor: ${p.traits.humor}, warmth: ${p.traits.warmth})`));
+
+  } catch (err) {
+    console.error('❌ Seed failed:', err);
+    process.exit(1);
+  } finally {
+    await client.close();
+    console.log('\n✅ Seed complete');
+  }
 }
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+
+seed();

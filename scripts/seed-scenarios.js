@@ -10,51 +10,120 @@
  *   "defaults": { "revealMode":"instant", "pointsOnCorrect":10 } // optional, not stored here
  * }
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { connectMongo, closeMongo, getDb, collections } from "../src/db/mongo.js";
+import dotenv from 'dotenv';
+import { MongoClient } from 'mongodb';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-async function main() {
-  await connectMongo();
-  const { scenarios } = collections();
-
-  // Locate data/scenarios.json regardless of CWD
-  const dataPath = path.resolve(__dirname, "../data/scenarios.json");
-  if (!fs.existsSync(dataPath)) {
-    throw new Error(`Data file not found: ${dataPath}`);
-  }
-  const raw = fs.readFileSync(dataPath, "utf8");
-  const json = JSON.parse(raw);
-
-  const list = Array.isArray(json) ? json : (Array.isArray(json.scenarios) ? json.scenarios : []);
-  if (!list.length) throw new Error("No scenarios found in data/scenarios.json");
+dotenv.config();
 
 
-  // Minimal normalize
-  const docs = list.map((s) => ({
-    prompt: s.prompt,
-    options: s.options,
-    correctIndex: Number.isInteger(s.correctIndex) ? s.correctIndex : (Number.isInteger(s.answer) ? s.answer : 0),
-    host: s.host || s.persona || "Elio",
-    tags: s.tags || [],
-    enabled: s.enabled ?? true,
+const scenarios = [
+  {
+    prompt: 'In the Elio film, what is Elio\'s main dream?',
+    options: [
+      'To become a famous musician',
+      'To explore the stars',
+      'To meet aliens',
+      'To become an astronaut'
+    ],
+    correctIndex: 1,
+    host: 'Elio',
+    tags: ['elio', 'film', 'trivia'],
+    enabled: true,
     createdAt: new Date(),
-  }));
+    weight: 1,
+  },
+  {
+    prompt: 'What instrument does Elio love to play?',
+    options: [
+      'Guitar',
+      'Piano',
+      'Drums',
+      'Violin'
+    ],
+    correctIndex: 0,
+    host: 'Elio',
+    tags: ['elio', 'music', 'trivia'],
+    enabled: true,
+    createdAt: new Date(),
+    weight: 1,
+  },
+  {
+    prompt: 'Who is Elio\'s responsible older brother?',
+    options: [
+      'Jake',
+      'Jude',
+      'Max',
+      'Sam'
+    ],
+    correctIndex: 1,
+    host: 'Jude',
+    tags: ['elio', 'characters', 'trivia'],
+    enabled: true,
+    createdAt: new Date(),
+    weight: 1,
+  },
+  {
+    prompt: 'What does Elio see in the night sky that changes everything?',
+    options: [
+      'A shooting star',
+      'A spaceship',
+      'An alien signal',
+      'A constellation'
+    ],
+    correctIndex: 1,
+    host: 'Elio',
+    tags: ['elio', 'film', 'plot'],
+    enabled: true,
+    createdAt: new Date(),
+    weight: 1,
+  },
+  {
+    prompt: 'Which character is known for being the most energetic and fun-loving?',
+    options: [
+      'Elio',
+      'Jude',
+      'Molly',
+      'Oliver'
+    ],
+    correctIndex: 2,
+    host: 'Molly',
+    tags: ['elio', 'characters', 'personality'],
+    enabled: true,
+    createdAt: new Date(),
+    weight: 1,
+  }
+];
 
-  await scenarios.deleteMany({});
-  const { insertedCount } = await scenarios.insertMany(docs);
-  console.log(`[INT] scenarios inserted: ${insertedCount}`);
+async function seed() {
+  const client = new MongoClient(process.env.MONGODB_URI);
+
+  try {
+    await client.connect();
+    console.log('✅ Connected to MongoDB');
+
+    const db = client.db(process.env.DB_NAME || 'communiverse_bot');
+    const collection = db.collection('scenarios');
+
+    // Clear existing
+    await collection.deleteMany({});
+    console.log('🗑️  Cleared existing scenarios');
+
+    // Insert
+    const result = await collection.insertMany(scenarios);
+    console.log(`✅ Inserted ${result.insertedCount} scenarios`);
+
+    // List
+    const all = await collection.find({}).toArray();
+    console.log('\n📋 Scenarios in database:');
+    all.forEach(s => console.log(`  - "${s.prompt.substring(0, 50)}..." (host: ${s.host})`));
+
+  } catch (err) {
+    console.error('❌ Seed failed:', err);
+    process.exit(1);
+  } finally {
+    await client.close();
+    console.log('\n✅ Seed complete');
+  }
 }
 
-main()
-  .catch((e) => {
-    console.error("[ERR] seed-scenarios failed:", e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await closeMongo();
-  });
+seed();
