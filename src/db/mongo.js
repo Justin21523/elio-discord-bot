@@ -88,6 +88,45 @@ export function getDb() {
   return state.db;
 }
 
+/**
+ * Run an operation scoped to a collection.
+ */
+export async function withCollection(name, fn) {
+  const db = getDb();
+  const col = db.collection(name);
+  return fn(col);
+}
+
+/**
+ * Ensure indexes used by Scenario/Answers/Points services (idempotent).
+ * Swallow NamespaceNotFound/IndexAlreadyExists.
+ */
+export async function ensureIndexes() {
+  const database = getDb();
+  const safeCreate = async (colName, specs = []) => {
+    const col = database.collection(colName);
+    for (const s of specs) {
+      try { await col.createIndex(s.key, s.options || {}); }
+      catch (e) { /* ignore index races */ }
+    }
+  };
+
+  await safeCreate("scenario_sessions", [
+    { key: { guildId: 1, channelId: 1, active: 1 }, options: { unique: true, name: "uniq_active_session" } },
+    { key: { createdAt: 1 }, options: { name: "createdAt" } },
+  ]);
+
+  await safeCreate("scenario_answers", [
+    { key: { sessionId: 1, userId: 1 }, options: { unique: true, name: "uniq_answer_per_user" } },
+    { key: { createdAt: 1 }, options: { name: "createdAt" } },
+  ]);
+
+  await safeCreate("profiles", [
+    { key: { guildId: 1, userId: 1 }, options: { unique: true, name: "uniq_profile" } },
+    { key: { points: -1 }, options: { name: "points_desc" } },
+  ]);
+}
+
 /** for tests/tools */
 export function collections() {
   const db = getDb();

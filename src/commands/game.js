@@ -1,66 +1,62 @@
-import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { collections } from '../db/mongo.js';
-import { awardWin, getLeaderboard } from '../services/points.js';
-import { safeDefer, edit } from '../util/replies.js';
+// /src/commands/game.js
+// English-only code & comments.
+//
+// Slash: /game start | buzz | stop
+// Thin handler; all business logic is in services/game.js.
+
+import { SlashCommandBuilder } from 'discord.js';
+import * as Game from '../services/game.js';
+import { logger } from '../util/logger.js';
 
 export const data = new SlashCommandBuilder()
   .setName('game')
-  .setDescription('Quick-react mini-game')
-  .addSubcommand(sc => sc.setName('start').setDescription('Start a quick-react game'))
-  .addSubcommand(sc => sc.setName('leaderboard').setDescription('Show top users'));
+  .setDescription('Mini game: AI-powered quick quiz (first correct answer wins).')
+  .addSubcommand(s =>
+    s.setName('start')
+      .setDescription('Start a quick quiz in this channel.')
+      .addIntegerOption(o => o.setName('ttl_sec').setDescription('Answer window in seconds (default 45).').setMinValue(10).setMaxValue(180))
+      .addIntegerOption(o => o.setName('award').setDescription('Points for winner (default 10).').setMinValue(1).setMaxValue(100))
+  )
+  .addSubcommand(s =>
+    s.setName('buzz')
+      .setDescription('Answer the current question.')
+      .addStringOption(o => o.setName('answer').setDescription('Your answer').setRequired(true))
+  )
+  .addSubcommand(s =>
+    s.setName('stop').setDescription('Stop the current game (admin/host only).')
+  );
 
-export async function execute(interaction, client) {
+export async function execute(interaction) {
+  const sub = interaction.options.getSubcommand();
+  const meta = { guildId: interaction.guildId, channelId: interaction.channelId, userId: interaction.user.id };
+  await interaction.deferReply({ ephemeral: true });
+
   try {
-    await safeDefer(interaction, true);
-    const sub = interaction.options.getSubcommand();
-
     if (sub === 'start') {
-      const { games } = collections();
-      const doc = {
-        guildId: interaction.guildId,
-        channelId: interaction.channelId,
-        type: 'first-click',
-        status: 'open',
-        startedAt: new Date()
-      };
-      const res = await games.insertOne(doc);
-      const gameId = res.insertedId.toString();
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`first_${gameId}`).setLabel("I'm first!").setStyle(ButtonStyle.Success)
-      );
-
-      const msg = await interaction.followUp({ content: 'First to click WINS!', components: [row], ephemeral: false });
-      await games.updateOne({ _id: res.insertedId }, { $set: { messageId: msg.id } });
-      return edit(interaction, 'Game posted!');
+      const ttlSec = interaction.options.getInteger('ttl_sec') ?? undefined;
+      const award = interaction.options.getInteger('award') ?? undefined;
+      const res = await Game.start({ guildId: interaction.guildId, channelId: interaction.channelId, hostId: interaction.user.id, ttlSec, award });
+      if (!res.ok) return interaction.editReply(`❌ ${res.error.code}: ${res.error.message}`);
+      return interaction.editReply(`🎯 Quiz posted! Expires in ${Math.round((res.data.expiresAt - Date.now())/1000)}s.`);
     }
 
-    if (sub === 'leaderboard') {
-      const top = await getLeaderboard(interaction.guildId, 10);
-      if (!top.length) return edit(interaction, 'No scores yet.');
-      const lines = top.map((p, i) => `${i + 1}. <@${p.userId}> — ${p.points} pts (Lv.${p.level || 1})`);
-      return edit(interaction, 'Top players:\n' + lines.join('\n'));
+    if (sub === 'buzz') {
+      const answer = interaction.options.getString('answer', true);
+      const res = await Game.buzz({ guildId: interaction.guildId, channelId: interaction.channelId, userId: interaction.user.id, username: interaction.user.username, answer });
+      if (!res.ok) return interaction.editReply(`⚠️ ${res.error.code}: ${res.error.message}`);
+      if (res.data.correct) return interaction.editReply(`✅ Correct! You won this round.`);
+      return interaction.editReply(`❌ Not correct. Keep trying!`);
     }
 
-    return edit(interaction, 'Unknown subcommand.');
-  } catch (e) {
-    console.error('[ERR] /game failed:', e);
-    return edit(interaction, 'Something went wrong while handling /game.');
-  }
-}
+    if (sub === 'stop') {
+      const res = await Game.stop({ guildId: interaction.guildId, channelId: interaction.channelId });
+      if (!res.ok) return interaction.editReply(`⚠️ ${res.error.code}: ${res.error.message}`);
+      return interaction.editReply(`⛔ Stopped.`);
+    }
 
-// Interaction button router (wired in index.js)
-export async function handleButton(interaction) {
-  if (!interaction.customId?.startsWith('first_')) return false;
-  const gameId = interaction.customId.split('_')[1];
-  const { games } = collections();
-  const game = await games.findOne({ _id: new (await import('mongodb')).ObjectId(gameId) });
-  if (!game || game.status !== 'open') {
-    return interaction.reply({ content: 'Too late!', ephemeral: true });
+    return interaction.editReply('Unknown subcommand.');
+  } catch (err) {
+    logger.error({ ...meta, err }, '[CMD] /game crashed');
+    return interaction.editReply('❌ Internal error.');
   }
-  await games.updateOne({ _id: game._id }, { $set: { status: 'closed', winnerUserId: interaction.user.id } });
-
-  const profile = await awardWin({ guildId: interaction.guildId, userId: interaction.user.id });
-  await interaction.reply({ content: `��� <@${interaction.user.id}> wins! (+${profile ? 'points' : ''})`, ephemeral: false });
-  return true;
 }

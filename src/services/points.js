@@ -1,29 +1,77 @@
-import { collections } from '../db/mongo.js';
-import { CONFIG } from '../config.js';
+// Domain Service: Points / Levels
+// English-only. In-memory store.
+import { withCollection } from "../db/mongo.js";
+import { incCounter } from "../util/metrics.js";
 
-/** Trivial level curve: level = floor(points / 50) + 1 */
-function computeLevel(points) {
-  return Math.floor(points / 50) + 1;
-}
+const LEVEL_THRESHOLDS = [0, 50, 120, 250, 500, 900, 1500]; // simple defaults
 
-export async function awardWin({ guildId, userId, points = CONFIG.GAME_WIN_POINTS }) {
-  const { profiles } = collections();
-  const now = new Date();
-  const res = await profiles.findOneAndUpdate(
-    { guildId, userId },
-    { $inc: { points }, $setOnInsert: { level: 1, streak: 0 }, $set: { lastWinAt: now } },
-    { upsert: true, returnDocument: 'after' }
-  );
-  const doc = res.value;
-  const level = computeLevel(doc.points);
-  if (level !== (doc.level || 1)) {
-    await profiles.updateOne({ _id: doc._id }, { $set: { level } });
-    doc.level = level;
+const _users = new Map(); // key: `${guildId}:${userId}` -> { points, lastAwardAt }
+
+function ok(data) { return { ok: true, data }; }
+function err(code, message, cause, details) { return { ok: false, error: { code, message, cause, details } }; }
+
+export async function award({ guildId, userId, amount, reason = "", sourceRef = null, seasonId = null }) {
+  try {
+    if (!guildId || !userId || !Number.isFinite(amount)) {
+      return err("VALIDATION_FAILED", "Invalid award payload");
+    }
+    const now = new Date();
+    const res = await withCollection("profiles", async (col) => {
+      const update = {
+        $inc: { points: amount },
+        $setOnInsert: { createdAt: now },
+        $set: { updatedAt: now, seasonId: seasonId || null },
+        $push: { history: { t: now, amount, reason, sourceRef } },
+      };
+      const { value } = await col.findOneAndUpdate(
+        { guildId, userId },
+        update,
+        { upsert: true, returnDocument: "after" }
+      );
+      return value;
+    });
+
+    incCounter("commands_total", { command: "points.award" });
+    return ok({ profile: decorateLevel(res) });
+  } catch (cause) {
+    return err("DB_ERROR", "Award points failed", cause);
   }
-  return doc;
 }
 
-export async function getLeaderboard(guildId, limit = 10) {
-  const { profiles } = collections();
-  return profiles.find({ guildId }).sort({ points: -1 }).limit(limit).toArray();
+export async function leaderboard({ guildId, seasonId = null, limit = 10 }) {
+  try {
+    const rows = await withCollection("profiles", async (col) => {
+      const q = { guildId };
+      if (seasonId !== null) q.seasonId = seasonId;
+      return col.find(q).sort({ points: -1 }).limit(limit).toArray();
+    });
+
+    incCounter("commands_total", { command: "points.leaderboard" });
+    return ok({ entries: rows.map(decorateLevel) });
+  } catch (cause) {
+    return err("DB_ERROR", "Leaderboard query failed", cause);
+  }
+}
+
+export async function getProfile({ guildId, userId }) {
+  try {
+    const doc = await withCollection("profiles", (col) => col.findOne({ guildId, userId }));
+    if (!doc) return err("NOT_FOUND", "Profile not found");
+    return ok({ profile: decorateLevel(doc) });
+  } catch (cause) {
+    return err("DB_ERROR", "Get profile failed", cause);
+  }
+}
+
+export function currentLevel(points) {
+  let lvl = 0;
+  for (let i = 0; i < LEVEL_THRESHOLDS.length; i++) {
+    if (points >= LEVEL_THRESHOLDS[i]) lvl = i;
+  }
+  return { level: lvl, nextAt: LEVEL_THRESHOLDS[lvl + 1] ?? null };
+}
+
+function decorateLevel(profile) {
+  const { level, nextAt } = currentLevel(profile.points || 0);
+  return { ...profile, level, nextLevelAt: nextAt };
 }

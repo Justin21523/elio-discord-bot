@@ -1,68 +1,145 @@
-import cron from "node-cron";
-import { collections } from "../db/mongo.js";
-import { pickRandom } from "./mediaRepo.js";
-import { postGreet } from "./greetings.js";
+// Scheduler service (Mongo-backed + node-cron runner)
+// English-only. Public API: bootFromDb, arm, reloadForGuild, list, remove, setClient, setJobRunner.
 
-const jobs = new Map(); // key: `${guildId}:${kind}` -> cron task
+import cron from 'node-cron';
+import { collections } from '../db/mongo.js';
+import { logInfo, logError } from '../util/logger.js';
+import { incCounter, startTimer, METRIC_NAMES, setGauge  } from '../util/metrics.js';
 
-export async function armAll(client) {
-  const { schedules } = collections();
-  const all = await schedules.find({ enabled: { $ne: false } }).toArray();
-  for (const s of all) {
-    await armOne(client, s.guildId, s.channelId, s.hhmm, s.kind || "drop", {
-      tags: s.tags || [],
-      mention: s.mention || "none",
-    });
+const runners = new Map(); // key: `${guildId}:${kind}` -> { task, spec, channelId, meta }
+let _client = null;
+let _jobRunner = null; // optional: (kind, doc) => Promise<void>
+
+export function setClient(client) { _client = client; }
+export function setJobRunner(fn) { _jobRunner = fn; }
+function key(guildId, kind) { return `${guildId}:${kind}`; }
+
+async function scheduleOne(doc) {
+  const { guildId, channelId, kind, spec, meta } = doc;
+  const k = key(guildId, kind);
+
+  // stop previous if exists
+  const ex = runners.get(k);
+  if (ex?.task) ex.task.stop();
+
+  const task = cron.schedule(spec, async () => {
+    const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'job' });
+    try {
+      incCounter(METRIC_NAMES.jobs_total, { kind });
+      if (typeof _jobRunner === 'function') {
+        await _jobRunner(kind, { guildId, channelId, meta: meta || {}, spec });
+      } else if (_client && channelId) {
+        const ch = await _client.channels.fetch(channelId).catch(() => null);
+        if (ch?.isTextBased()) {
+          await ch.send(`🛰️ Job **${kind}** fired @ ${new Date().toISOString()}`);
+        }
+      }
+    } catch (e) {
+      logError('[JOB]', { guildId, channelId, kind, error: String(e) });
+    } finally {
+      stop();
+    }
+  });
+
+  runners.set(k, { task, spec, channelId, meta });
+  setGauge(METRIC_NAMES.scheduled_jobs, runners.size);
+  logInfo('[JOB] armed', { guildId, kind, spec, channelId });
+}
+
+
+/** Boot from DB: schedule all enabled jobs */
+export async function bootFromDb() {
+  try {
+    const docs = await collections.jobs.find({ enabled: true }).toArray();
+    for (const d of docs) await scheduleOne(d);
+    return { ok: true, data: { count: docs.length } };
+  } catch (e) {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'bootFromDb failed', cause: String(e) } };
   }
 }
 
-export async function armOne(
-  client,
-  guildId,
-  channelId,
-  hhmm,
-  kind = "drop",
-  extra = {}
-) {
-  const [HH, MM] = (hhmm || "").split(":").map(Number);
-  if (Number.isNaN(HH) || Number.isNaN(MM)) throw new Error("Invalid HH:MM");
+/** Upsert & arm (idempotent by {guildId, kind}) */
+export async function arm({ guildId, channelId, kind, hhmm, meta = {} } = {}) {
+  if (!guildId || !channelId || !kind || !/^\d{1,2}:\d{2}$/.test(hhmm || '')) {
+    return { ok: false, error: { code: 'VALIDATION_FAILED', message: 'Invalid arm() params' } };
+  }
+  try {
+    const [hh, mm] = (hhmm || '0:0').split(':').map(Number);
+    const spec = `${mm} ${hh} * * *`;
 
-  const key = `${guildId}:${kind}`;
-  const existing = jobs.get(key);
-  if (existing) existing.stop();
+    const res = await collections.jobs.findOneAndUpdate(
+      { guildId, kind },
+      {
+        $set: {
+          guildId, kind, channelId, spec, meta, enabled: true, updatedAt: new Date(),
+        },
+        $setOnInsert: { createdAt: new Date() },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
 
-  const spec = `${MM} ${HH} * * *`; // every day HH:MM UTC
-  const task = cron.schedule(
-    spec,
-    async () => {
-      try {
-        if (kind === "greet") {
-          await postGreet(client, {
-            guildId,
-            channelId,
-            tags: extra.tags || [],
-            mention: extra.mention || "none",
-          });
-          console.log("[JOB] greet ->", guildId, channelId);
-        } else {
-          const channel = await client.channels.fetch(channelId);
-          const item = await pickRandom({
-            allowNsfw: !!channel?.nsfw,
-            tags: extra.tags || [],
-          });
-          if (!item)
-            return channel.send("No media yet. Ask an admin to add some!");
-          await channel.send(item.url);
-          console.log("[JOB] drop ->", guildId, channelId, item.url);
-        }
-      } catch (e) {
-        console.error("[ERR] cron job failed:", e);
-      }
-    },
-    { timezone: "UTC" }
-  );
+    await scheduleOne(res.value);
+    return { ok: true, data: { spec, meta } };
+  } catch (e) {
+    const dup = String(e).includes('E11000');
+    return { ok: false, error: { code: dup ? 'VALIDATION_FAILED' : 'DB_ERROR', message: 'arm failed', cause: String(e) } };
+  }
+}
 
-  jobs.set(key, task);
-  task.start();
-  console.log("[JOB] Armed cron", { guildId, kind, hhmm, channelId });
+
+/** Reload all jobs for a guild */
+export async function reloadForGuild(guildId) {
+  try {
+    for (const [k, v] of runners) {
+      if (k.startsWith(`${guildId}:`)) { v.task?.stop?.(); runners.delete(k); }
+    }
+    const docs = await collections.jobs.find({ guildId, enabled: true }).toArray();
+    for (const d of docs) await scheduleOne(d);
+    return { ok: true, data: { count: docs.length } };
+  } catch (e) {
+    return { ok: false, error: { code: 'SCHEDULE_ERROR', message: 'reloadForGuild failed', cause: String(e) } };
+  }
+}
+
+/** NEW: Arm an existing job (enable + schedule) by {guildId, kind} */
+export async function armOne({ guildId, kind }) {
+  if (!guildId || !kind) {
+    return { ok: false, error: { code: 'BAD_REQUEST', message: 'guildId and kind are required' } };
+  }
+  try {
+    const doc = await collections.jobs.findOne({ guildId, kind });
+    if (!doc) return { ok: false, error: { code: 'NOT_FOUND', message: 'job not found', details: { guildId, kind } } };
+
+    // ensure enabled
+    if (!doc.enabled) {
+      await collections.jobs.updateOne({ guildId, kind }, { $set: { enabled: true, updatedAt: new Date() } });
+      doc.enabled = true;
+    }
+    await scheduleOne(doc);
+    return { ok: true, data: { meta: doc.meta || {} } };
+  } catch (e) {
+    return { ok: false, error: { code: 'SCHEDULE_ERROR', message: 'armOne failed', cause: String(e), details: { guildId, kind } } };
+  }
+}
+
+/** Optional helpers */
+export async function list(guildId) {
+  try {
+    const docs = await collections.jobs.find(guildId ? { guildId } : {}).toArray();
+    return { ok: true, data: { rows: docs } };
+  } catch (e) {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'list failed', cause: String(e) } };
+  }
+}
+
+export async function remove({ guildId, kind }) {
+  try {
+    const k = key(guildId, kind);
+    const ex = runners.get(k);
+    if (ex) { ex.task?.stop?.(); runners.delete(k); setGauge(METRIC_NAMES.scheduled_jobs, runners.size); }
+    const res = await collections.jobs.deleteOne({ guildId, kind });
+    return { ok: true, data: { deleted: res.deletedCount || 0 } };
+  } catch (e) {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'remove failed', cause: String(e) } };
+  }
 }

@@ -1,58 +1,24 @@
-// src/services/webhooks.js
-// Ensures a per-channel webhook and sends messages with dynamic username/avatar.
-// Robust: no token required; graceful fallback to channel.send().
+// Domain Service: Webhooks-style persona speaking.
+// English-only. Uses client to send with persona-prefix (no real webhook yet).
 
-const cache = new Map(); // channelId -> { id, token }
+import { EmbedBuilder } from 'discord.js';
 
-/** Ensure a webhook exists for this channel (named "Communiverse Persona"). */
-export async function ensureWebhook(channel) {
-  const key = channel.id;
-  if (cache.has(key)) return cache.get(key);
+let _client = null;
+export function setClient(client) { _client = client; }
 
+/** Post using a persona (name/avatar color simulated with embed). */
+export async function personaSay(channelId, persona, content) {
+  if (!_client) return { ok: false, error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'client not attached' } };
   try {
-    const hooks = await channel.fetchWebhooks();
-    let hook = hooks.find((h) => h.name === "Communiverse Persona" && h.token); // prefer one with token
-    if (!hook) {
-      // try any existing hook with our name (no token is fine)
-      hook = hooks.find((h) => h.name === "Communiverse Persona") || null;
-    }
-    if (!hook) {
-      // need Manage Webhooks permission
-      hook = await channel.createWebhook({ name: "Communiverse Persona" });
-    }
-    const info = { id: hook.id, token: hook.token || null };
-    cache.set(key, info);
-    return info;
+    const ch = await _client.channels.fetch(channelId);
+    if (!ch?.isTextBased()) return { ok: false, error: { code: 'BAD_REQUEST', message: 'channel not text-based' } };
+    const embed = new EmbedBuilder()
+      .setAuthor({ name: persona?.name || 'Persona' })
+      .setDescription(content)
+      .setColor(persona?.color || 0x00bcd4);
+    await ch.send({ embeds: [embed] });
+    return { ok: true, data: { posted: true } };
   } catch (e) {
-    // No permission or other error
-    return null;
-  }
-}
-
-export async function personaSay(channel, { name, avatar, content, embeds }) {
-  try {
-    const info = await ensureWebhook(channel);
-    if (info) {
-      // If token is present, we can use webhook token route; otherwise use bot auth by id only.
-      const wh = info.token
-        ? await channel.client.fetchWebhook(info.id, info.token)
-        : await channel.client.fetchWebhook(info.id);
-
-      return await wh.send({
-        username: name,
-        avatarURL: avatar || undefined,
-        content: content || undefined,
-        embeds,
-      });
-    }
-    // Fallback when webhook is unavailable (no permission)
-    return await channel.send({ content: content || undefined, embeds });
-  } catch (e) {
-    // Final fallback
-    try {
-      return await channel.send({ content: content || undefined, embeds });
-    } catch {
-      throw e;
-    }
+    return { ok: false, error: { code: 'DISCORD_API_ERROR', message: 'failed to post', cause: String(e) } };
   }
 }
