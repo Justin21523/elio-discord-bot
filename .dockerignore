@@ -1,8 +1,31 @@
+# Node
 node_modules
-.git
-.gitignore
-Dockerfile*
-docker-compose.yml
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+
+# Python / venv / caches
+__pycache__/
+*.pyc
+.venv
 .env
 .env.*
-*.log
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.DS_Store
+
+# Local data & caches
+.mono/
+.mongod*
+.mongo-data
+mongo-data
+hf-cache
+ai-python/hf-cache
+data/
+uploads/
+
+# Docker trash in repo
+docker-*.log

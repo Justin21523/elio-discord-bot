@@ -1,46 +1,97 @@
+version: "3.9"
+
 services:
   mongo:
     image: mongo:7
-    # no container_name -> will be <project>_mongo_1; avoids clash with any existing "mongo"
+    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_mongo_1
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: dev
       MONGO_INITDB_ROOT_PASSWORD: devpass
+      MONGO_INITDB_DATABASE: communiverse_bot
     volumes:
-      - ./.mongo-data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok" ]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      - mongo-data:/data/db
     command: ["--auth"]
-
-  bot:
-    build: .
-    # no container_name -> <project>_bot_1
-    restart: unless-stopped
-    depends_on:
-      - mongo
-    env_file:
-      - .env
-    environment:
-      # Inside compose network, connect to "mongo:27017" instead of localhost
-      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
-      DB_NAME: ${DB_NAME:-communiverse_bot}
     healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('net').connect(443,'discord.com').on('connect',()=>{console.log('ok');process.exit(0)}).on('error',()=>process.exit(1))",
-        ]
+      test: ["CMD", "mongosh", "-u", "dev", "-p", "devpass", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  ai-python:
+    build:
+      context: ./ai-python
+      dockerfile: Dockerfile
+    image: communiverse-ai:1.1.0
+    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_ai_1
+    restart: unless-stopped
+    environment:
+      # ---- Runtime flags ----
+      ENABLE_CUDA: "${ENABLE_CUDA:-1}"            # "1" to enable CUDA; requires nvidia runtime
+      HF_HOME: /root/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /root/.cache/huggingface/sentence-transformers
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128"
+
+      # ---- Models (propagate from .env) ----
+      LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      LLM_CHAT_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      VLM_MODEL: ${VLM_MODEL:-llava-1.6}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-m3}
+
+      # ---- Mongo for sidecar RAG (Atlas 或本機) ----
+      MONGO_URI: ${MONGODB_URI:-mongodb://dev:devpass@mongo:27017/communiverse_bot?authSource=admin}
+      MONGO_DB: ${DB_NAME:-communiverse_bot}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - ./ai-python:/srv/app
+    working_dir: /srv/app
+    command: >
+      bash -lc "pip install -r requirements.txt
+      && uvicorn app.main:app --host 0.0.0.0 --port 8088"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]   # remove if no GPU
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8088/health"]
       interval: 30s
       timeout: 5s
-      retries: 5
+      retries: 20
+      start_period: 300s
+    ports:
+      - "8088:8088"
+    depends_on:
+      mongo:
+        condition: service_healthy
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: communiverse-bot:1.1.0
+    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_bot_1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # ---- override/ensure criticals for bot process ----
+      AI_API_BASE_URL: ${AI_API_BASE_URL:-http://ai-python:8088}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://dev:devpass@mongo:27017/communiverse_bot?authSource=admin}
+      DB_NAME: ${DB_NAME:-communiverse_bot}
+    depends_on:
+      ai-python:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    working_dir: /app
+    command: ["node","src/index.js"]
 
 volumes:
-  mongo_data:
+  mongo-data: {}
+  hf-cache: {}
