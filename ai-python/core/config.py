@@ -10,12 +10,12 @@ from typing import List
 
 @dataclass
 class Features:
-    enable_chat: bool = True
-    enable_rag: bool = True
-    enable_agent: bool = True
-    enable_vqa: bool = True
-    enable_caption: bool = True
-    preload_models: bool = bool(int(os.getenv("FEATURES__PRELOAD_MODELS", "0")))
+    enable_chat: bool = field(default_factory=lambda: os.getenv("FEATURES_ENABLE_CHAT", "true").lower() == "true")
+    enable_rag: bool = field(default_factory=lambda: os.getenv("FEATURES_ENABLE_RAG", "true").lower() == "true")
+    enable_agent: bool = field(default_factory=lambda: os.getenv("FEATURES_ENABLE_AGENT", "true").lower() == "true")
+    enable_vqa: bool = field(default_factory=lambda: os.getenv("FEATURES_ENABLE_VQA", "true").lower() == "true")
+    enable_caption: bool = field(default_factory=lambda: os.getenv("FEATURES_ENABLE_CAPTION", "true").lower() == "true")
+    preload_models: bool = field(default_factory=lambda: os.getenv("FEATURES_PRELOAD_MODELS", "false").lower() == "true")
 
 # ---------- API misc ----------
 @dataclass
@@ -45,7 +45,8 @@ class LLMModels:
 # ---------- Embeddings ----------
 @dataclass
 class EmbeddingsCfg:
-    model_name: str = field(default_factory=lambda: os.getenv("EMBED__MODEL", "BAAI/bge-m3"))
+    # Support both EMBEDDINGS_MODEL (from .env) and EMBED__MODEL (legacy)
+    model_name: str = field(default_factory=lambda: os.getenv("EMBEDDINGS_MODEL", os.getenv("EMBED__MODEL", "BAAI/bge-m3")))
     device: str = field(default_factory=lambda: os.getenv("EMBED__DEVICE", "cpu"))
 
 # ---------- VLM ----------
@@ -59,11 +60,13 @@ class VLMModels:
 @dataclass
 class MongoCfg:
     uri: str = field(default_factory=lambda: os.getenv("MONGO_URI", ""))
-    db: str = field(default_factory=lambda: os.getenv("MONGO_DB", "communiverse"))
+    db: str = field(default_factory=lambda: os.getenv("MONGO_DB", "communiverse_bot"))
     coll_chunks: str = field(default_factory=lambda: os.getenv("MONGO_COLL_RAG", "rag_chunks"))
     coll_docs: str = field(default_factory=lambda: os.getenv("MONGO_COLL_RAG_DOCS", "rag_docs"))
-    rag_backend: str = field(default_factory=lambda: os.getenv("RAG__BACKEND", "avs"))
-    avs_index: str = field(default_factory=lambda: os.getenv("RAG__AVS_INDEX", "rag_chunks_avs"))
+    # Support both RAG_PROVIDER (from .env) and RAG__BACKEND (legacy)
+    rag_backend: str = field(default_factory=lambda: os.getenv("RAG_PROVIDER", os.getenv("RAG__BACKEND", "atlas")))
+    # Support both RAG_INDEX_NAME (from .env) and RAG__AVS_INDEX (legacy)
+    avs_index: str = field(default_factory=lambda: os.getenv("RAG_INDEX_NAME", os.getenv("RAG__AVS_INDEX", "rag_vector")))
     text_index: str = field(default_factory=lambda: os.getenv("RAG__TEXT_INDEX", "rag_text_search"))
 
 

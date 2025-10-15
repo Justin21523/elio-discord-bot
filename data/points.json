@@ -1,0 +1,8 @@
+{
+  "guildId": "YOUR_DEV_GUILD_ID",
+  "profiles": [
+    { "userId": "111111111111111111", "points": 120, "streak": 3 },
+    { "userId": "222222222222222222", "points": 45 },
+    { "userId": "333333333333333333", "points": 5 }
+  ]
+}

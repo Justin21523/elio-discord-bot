@@ -1,124 +1,37 @@
 {
   "greetings": [
     {
-      "text": "Good {weekday}, {guild}! Elio says: shine a little brighter today.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
+      "text": "Good {weekday}, {guild}! Elio beams a cozy hello ✨",
+      "tags": ["elio", "warm"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Elio",
+      "style": { "title": "Elio says hi", "markdownAccent": "**", "useCodeFontForTags": true, "showTagsField": true },
+      "imageUrl": null
     },
     {
-      "text": "Hey {user}, Elio is rooting for you. Let’s make {weekday} gentle and brave.",
-      "tags": ["elio"],
+      "text": "Morning, crew! Hydrate and stretch—tiny wins count today, {user}.",
+      "tags": ["elio", "daily"],
       "weight": 1,
-      "enabled": true
+      "enabled": true,
+      "personaHost": "Elio",
+      "style": { "title": "Starlight Reminder", "markdownAccent": "*", "useCodeFontForTags": false, "showTagsField": true }
     },
     {
-      "text": "Morning, crew! Elio reminder: small steps still count as starlight.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
+      "text": "We proceed with clarity. Thanks for showing up, team.",
+      "tags": ["caleb", "focus"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Caleb",
+      "style": { "title": "Caleb check-in", "markdownAccent": "**" }
     },
     {
-      "text": "Space check-in: breathe, sip water, carry Elio’s calm with you.",
-      "tags": ["elio"],
+      "text": "Hello! Do humans always greet potatoes first? …Asking for a friend.",
+      "tags": ["glordon", "humor"],
       "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "If {weekday} feels heavy, Elio says: ‘You’re allowed to be soft and still win.’",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Hello {guild}! Elio’s hug delivery → you are safe here.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Elio to {user}: thanks for showing up today. That’s already courage.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "New day, same glow. Elio believes you’ll find a tiny win on {weekday}.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Elio’s pocket note: ‘Rest is part of the mission.’ Don’t forget.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Team {guild}, if no one said it: Elio is proud of you for trying.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Gentle ping → Elio says hydrate, stretch, and be kind to yourself.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Your heart is a quiet comet. Elio sees it. Keep going, {user}.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Elio’s morning spell: light, luck, and a soft landing for you.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "If chaos comes, Elio votes for patience + a snack break.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Hi {guild}! Elio whispers: ‘You’re not behind. You’re on your path.’",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Elio’s mission brief: be curious, be gentle, try once more.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "For {user}: Elio grants you +1 courage and +1 cozy today.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Elio postcard from the stars: ‘You matter more than you know.’",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Deep breath in, let it go. Elio’s here; you’re not alone.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
-    },
-    {
-      "text": "Happy {weekday}! Elio challenge: say one kind thing to yourself.",
-      "tags": ["elio"],
-      "weight": 1,
-      "enabled": true
+      "enabled": true,
+      "personaHost": "Glordon",
+      "style": { "title": "Glordon wonders", "markdownAccent": "`", "useCodeFontForTags": true }
     }
   ]
 }

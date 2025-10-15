@@ -1,10 +1,11 @@
 // src/services/scenario.js
-// Scenario quiz engine. Business logic only; commands stay thin.
-// Guarantees: one active session per (guildId, channelId). Unique answer per user.
-// Optional AI distractors hook via aiFacade if options < 4.
+// Scenario quiz engine with weighted picking, timed reveal and speed-based scoring.
+// Keeps your original guarantees: one active session per (guildId, channelId),
+// unique answer per user, optional AI distractors, metrics gauges.
 
 import { withCollection } from "../db/mongo.js";
 import { incCounter, setGauge } from "../util/metrics.js";
+import * as Points from "./points.js";
 
 function ok(data) { return { ok: true, data }; }
 function err(code, message, cause, details) { return { ok: false, error: { code, message, cause, details } }; }
@@ -13,14 +14,22 @@ const SESSIONS = "scenario_sessions";
 const ANSWERS = "scenario_answers";
 const SCENARIOS = "scenarios";
 
+// ---- Scoring policy (tweak freely; all numbers are safe defaults)
+const DEFAULTS = {
+  durationSec: 30,          // how long a question stays open
+  basePoints: 30,           // minimum for a correct answer (even at the last second)
+  maxPoints: 100,           // max points for instant answer (correct and first millisecond)
+  firstCorrectBonus: 25,    // extra bonus to the first correct user
+};
+
 export async function startSession({ guildId, channelId, scenarioId = null, tag = null, mode = "quiz", aiFacade = null }) {
   const now = new Date();
   try {
-    // Make sure no other active session
+    // Ensure at most one active session
     const exists = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId, active: true }));
     if (exists) return err("VALIDATION_FAILED", "An active session already exists in this channel.");
 
-    // Pick scenario
+    // Pick scenario (weighted by `weight`)
     const scenario = await pickScenario({ scenarioId, tag });
     if (!scenario) return err("RAG_EMPTY", "No scenario available for given filter.");
 
@@ -28,19 +37,23 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
     let options = Array.isArray(scenario.options) ? [...scenario.options] : [];
     if (options.length < 4 && aiFacade) {
       try {
-        const more = await aiFacade.generateDistractors({
-          prompt: scenario.prompt,
-          correct: options[scenario.correctIndex ?? 0],
-          need: Math.max(0, 4 - options.length),
-          tag,
-        });
-        if (Array.isArray(more) && more.length) options = [...options, ...more].slice(0, 4);
-      } catch { /* AI optional */ }
+        const need = Math.max(0, 4 - options.length);
+        if (need > 0) {
+          const more = await aiFacade.generateDistractors({
+            prompt: scenario.prompt,
+            correct: options[scenario.correctIndex ?? 0],
+            need,
+            tag,
+          });
+          if (Array.isArray(more) && more.length) options = [...options, ...more].slice(0, 4);
+        }
+      } catch { /* optional AI hook */ }
     }
     if (options.length < 2) return err("VALIDATION_FAILED", "Scenario has insufficient options.");
 
     const doc = {
-      guildId, channelId,
+      guildId,
+      channelId,
       scenarioId: scenario._id,
       prompt: scenario.prompt,
       options,
@@ -48,8 +61,16 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
       mode,
       active: true,
       createdAt: now,
+      startedAt,
+      expireAt,
       revealAt: null,
       winnerUserId: null,
+      winnerScore: null,
+      // meta
+      hostPersonaName: scenario.hostPersonaName || null,
+      tags: Array.isArray(scenario.tags) ? scenario.tags : [],
+      durationSec: Math.max(5, durationSec),
+      firstCorrectUserId: null
     };
 
     const inserted = await withCollection(SESSIONS, async (col) => {
@@ -58,73 +79,121 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
     });
 
     incCounter("commands_total", { command: "scenario.start" });
-    // set the real number of active sessions as gauge
     const activeCount = await withCollection(SESSIONS, c => c.countDocuments({ active: true }));
-    setGauge("active_games", activeCount, {}); // ← 你的簽名為 (name, value, labels)
-    return ok({ session: sanitize(inserted) });
+    setGauge("active_games", activeCount, {});
+
+    return ok({
+      session: sanitize(inserted)
+    });
   } catch (cause) {
-    // Likely unique index violation => someone raced to create another session
     const msg = /E11000/.test(String(cause)) ? "Active session already exists." : "Failed to start session.";
     return err("SCHEDULE_ERROR", msg, cause);
   }
 }
 
+/**
+ * Answer:
+ * - Guards duplicate answers per user
+ * - Computes correctness
+ * - If correct: computes speed-based score, awards points, marks winner if first-to-correct
+ */
 export async function answer({ sessionId, userId, answerIndex = null, freeText = null }) {
   const now = new Date();
   try {
     const session = await withCollection(SESSIONS, (col) => col.findOne({ _id: sessionId, active: true }));
     if (!session) return err("NOT_FOUND", "Active session not found.");
 
-    // Unique answer per user enforced by unique index (sessionId,userId)
+    // Stop accepting after expireAt
+    if (session.expireAt && now > new Date(session.expireAt)) {
+      return err("VALIDATION_FAILED", "Time is up. Please wait for reveal.");
+    }
+
     const correct = (answerIndex !== null)
       ? Number(answerIndex) === Number(session.correctIndex)
       : (typeof freeText === "string" && normalize(freeText) === normalize(session.options[session.correctIndex]));
 
-    const row = await withCollection(ANSWERS, async (col) => {
+    // Insert answer (unique per user)
+    const insRes = await withCollection(ANSWERS, async (col) => {
       try {
-        await col.insertOne({ sessionId, userId, answerIndex, freeText, correct, createdAt: now });
+        await col.insertOne({ sessionId: session._id, guildId, channelId, userId, index, text, correct, createdAt: now });
+        return "OK";
       } catch (e) {
-        // duplicate answer
         if (String(e).includes("E11000")) return "DUP";
         throw e;
       }
-      return "OK";
     });
+    if (insRes === "DUP") return err("VALIDATION_FAILED", "You have already answered.");
 
-    if (row === "DUP") {
-      return err("VALIDATION_FAILED", "You have already answered this question.");
-    }
+    let scored = 0;
+    let first = false;
 
-    // In quiz/speedrun, first correct answer closes the session
     if (correct) {
-      await withCollection(SESSIONS, (col) => col.updateOne({ _id: sessionId }, { $set: { active: false, revealAt: now, winnerUserId: userId } }));
+      const elapsedMs = Math.max(0, now - new Date(session.startedAt));
+      const durationMs = Math.max(1, (session.durationSec || DEFAULTS.durationSec) * 1000);
+      const ratio = Math.max(0, 1 - (elapsedMs / durationMs)); // 1.0 at t0, 0.0 at deadline
+      const points = Math.round(DEFAULTS.basePoints + ratio * (DEFAULTS.maxPoints - DEFAULTS.basePoints));
+
+      // Set "first correct" if not yet set
+      const updated = await withCollection(SESSIONS, async (col) => {
+        const res = await col.findOneAndUpdate(
+          { _id: session._id, firstCorrectUserId: null },
+          { $set: { firstCorrectUserId: userId } },
+          { returnDocument: "after" }
+        );
+        return res?.value || session;
+      });
+      first = !session.firstCorrectUserId && updated.firstCorrectUserId === userId;
+
+      scored = points + (first ? DEFAULTS.firstCorrectBonus : 0);
+
+      // Award points
+      await Points.award({
+        guildId,
+        userId,
+        amount: scored,
+        reason: "scenario_correct",
+        meta: { scenarioId: session.scenarioId, sessionId: session._id, first, elapsedMs }
+      });
     }
 
     incCounter("commands_total", { command: "scenario.answer" });
-    // refresh active_games gauge (use your metrics signature: setGauge(name, value, labels))
-    const activeCountAfter = await withCollection(SESSIONS, c => c.countDocuments({ active: true }));
-    setGauge("active_games", activeCountAfter, {});
-    return ok({ correct, closed: correct === true });
+    return ok({ correct, scored, first });
   } catch (cause) {
     return err("DB_ERROR", "Answer failed", cause);
   }
 }
 
-
-export async function reveal({ sessionId }) {
+/** Reveal stats & winner (does not post to Discord; command will do it). */
+export async function reveal({ guildId, channelId }) {
   try {
-    const session = await withCollection(SESSIONS, (col) => col.findOne({ _id: sessionId }));
+    const session = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId }));
     if (!session) return err("NOT_FOUND", "Session not found.");
-    const answers = await withCollection(ANSWERS, (col) => col.find({ sessionId }).sort({ createdAt: 1 }).toArray());
-    return ok({
+
+    const answers = await withCollection(ANSWERS, (col) => col.find({ sessionId: session._id }).sort({ createdAt: 1 }).toArray());
+    const corrects = answers.filter(a => a.correct);
+
+    // winner = earliest correct
+    const winner = corrects[0] || null;
+    const winnerUserId = winner?.userId || null;
+
+    await withCollection(SESSIONS, (col) =>
+      col.updateOne({ _id: session._id }, { $set: { active: false, revealAt: new Date(), winnerUserId } })
+    );
+
+    const payload = {
       prompt: session.prompt,
       options: session.options,
       correctIndex: session.correctIndex,
-      winnerUserId: session.winnerUserId || null,
+      winnerUserId,
       totalAnswers: answers.length,
-      correctCount: answers.filter(a => a.correct).length,
-      active: !!session.active,
-    });
+      correctCount: corrects.length,
+      startedAt: session.startedAt,
+      expireAt: session.expireAt,
+      durationSec: session.durationSec || DEFAULTS.durationSec,
+      hostPersonaName: session.hostPersonaName || null,
+      tags: Array.isArray(session.tags) ? session.tags : []
+    };
+    return ok(payload);
   } catch (cause) {
     return err("DB_ERROR", "Reveal failed", cause);
   }
@@ -138,7 +207,6 @@ export async function cancel({ guildId, channelId }) {
       { returnDocument: "after" }
     ));
     if (!res?.value) return err("NOT_FOUND", "No active session to cancel.");
-    // right after successful cancel
     const activeCountAfter = await withCollection(SESSIONS, c => c.countDocuments({ active: true }));
     setGauge("active_games", activeCountAfter, {});
     return ok({ session: sanitize(res.value) });
@@ -147,20 +215,41 @@ export async function cancel({ guildId, channelId }) {
   }
 }
 
+// ---------- Internals ----------
+
 async function pickScenario({ scenarioId, tag }) {
   return withCollection(SCENARIOS, async (col) => {
     if (scenarioId) return col.findOne({ _id: scenarioId, enabled: { $ne: false } });
     const q = { enabled: { $ne: false } };
     if (tag) q.tags = tag;
-    const arr = await col.aggregate([{ $match: q }, { $sample: { size: 1 } }]).toArray();
-    return arr[0];
+
+    // Weighted pick (weight defaults to 1)
+    const docs = await col.find(q).toArray();
+    if (!docs.length) return null;
+
+    const total = docs.reduce((s, d) => s + (Number(d.weight) > 0 ? Number(d.weight) : 1), 0);
+    let r = Math.random() * total;
+    for (const d of docs) {
+      r -= (Number(d.weight) > 0 ? Number(d.weight) : 1);
+      if (r <= 0) return d;
+    }
+    return docs[0];
   });
 }
 
 function sanitize(session) {
   if (!session) return session;
-  const { prompt, options, correctIndex, mode, _id, guildId, channelId, active, createdAt, revealAt, winnerUserId } = session;
-  return { _id, guildId, channelId, prompt, options, correctIndex, mode, active, createdAt, revealAt, winnerUserId };
+  const {
+    prompt, options, correctIndex, mode, _id, guildId, channelId, active,
+    createdAt, startedAt, expireAt, revealAt, winnerUserId, hostPersonaName, tags, durationSec
+  } = session;
+  return {
+    _id, guildId, channelId, prompt, options, correctIndex, mode, active,
+    createdAt, startedAt, expireAt, revealAt, winnerUserId,
+    hostPersonaName: hostPersonaName || null,
+    tags: Array.isArray(tags) ? tags : [],
+    durationSec: durationSec || DEFAULTS.durationSec
+  };
 }
 
 function normalize(s) {

@@ -1,155 +1,75 @@
 // src/db/mongo.js
+// Mongo connection + helpers + backward-compatible `collections` export.
+// It now supports BOTH styles:
+//   collections('media')        // callable
+//   collections.media           // property access
+
 import { MongoClient } from "mongodb";
 import { CONFIG } from "../config.js";
 
-export const state = {
-  client: null,
-  db: null,
-};
+const state = { client: null, db: null };
 
 export async function connectMongo() {
-  if (state.client) return state.client;
-  const uri =
-    CONFIG.MONGODB_URI ||
-    "mongodb://dev:devpass@127.0.0.1:27017/?authSource=admin";
-  const client = new MongoClient(uri);
+  if (state.client) return state.db;
+  const uri = CONFIG.MONGODB_URI;
+  if (!uri) throw new Error("MONGODB_URI not set");
+
+  const client = new MongoClient(uri, { appName: "communiverse-bot" });
   await client.connect();
-  const db = client.db(CONFIG.DB_NAME || "communiverse_bot");
+
+  const dbName = CONFIG.DB_NAME || "communiverse_bot";
+  const db = client.db(dbName);
   state.client = client;
   state.db = db;
-
-  // ── Ensure indexes, but be tolerant when collections don't exist yet ──
-  const safeDropIndex = async (col, name) => {
-    try { await col.dropIndex(name); }
-    catch (e) {
-      if (!['IndexNotFound', 'NamespaceNotFound'].includes(e?.codeName) && e?.code !== 27) throw e;
-    }
-  };
-
-  // --- Core indexes for existing features ---
-  await Promise.all([
-    db.collection('media').createIndex({ enabled: 1, nsfw: 1 }),
-    (async () => {
-      const col = db.collection('schedules');
-      await safeDropIndex(col, 'guildId_1');
-      await col.createIndex({ guildId: 1, kind: 1 }, { unique: true });
-    })(),
-    db.collection('profiles').createIndex({ guildId: 1, points: -1 }),
-    db.collection('games').createIndex({ guildId: 1, status: 1 }),
-    db.collection('scenario_answers').createIndex({ sessionId: 1, userId: 1 }, { unique: true })
-  ]);
-
-  // --- New collections & indexes for Phase A ---
-  const greetings = db.collection("greetings");
-  const scenarios = db.collection("scenarios");
-  const scenarioSessions = db.collection("scenario_sessions");
-  const scenarioAnswers = db.collection("scenario_answers");
-  const personas = db.collection("personas");
-  const personaAffinity = db.collection("persona_affinity");
-  const personaConfig = db.collection("persona_config"); // single-doc config: actions/modifiers/cooldown
-
-  await Promise.all([
-    // greetings: query by enabled/tags when picking a message
-    greetings.createIndex({ enabled: 1, tags: 1 }),
-
-    // scenarios: query by enabled/tags/weight
-    scenarios.createIndex({ enabled: 1, tags: 1 }),
-
-    // sessions: find open ones per guild, or by status
-    scenarioSessions.createIndex({ guildId: 1, status: 1 }),
-    // scenario_answers: prevent multiple answers per user per session
-    scenarioAnswers.createIndex({ sessionId: 1, userId: 1 }, { unique: true }),
-
-    // personas: unique names; quick lookup by name
-    personas.createIndex({ name: 1 }, { unique: true }),
-
-    // persona_affinity: one record per (guild, user, persona)
-    personaAffinity.createIndex(
-      { guildId: 1, userId: 1, personaId: 1 },
-      { unique: true }
-    ),
-    // Optional TTL ideas (not enabled now):
-    // scenarioSessions.createIndex({ revealAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 }); // 30 days
-  ]);
-
-  console.log(
-    "[INT] Mongo connected ->",
-    CONFIG.DB_NAME,
-    "URI=",
-    CONFIG.MONGODB_URI
-  );
+  console.log("[INT] Mongo connected", { db: dbName });
   return db;
 }
 
-/** Helper for scripts to get the active DB after connectMongo() */
 export function getDb() {
-  if (!state.db)
-    throw new Error("Mongo not connected. Call connectMongo() first.");
+  if (!state.db) throw new Error("Mongo not connected. Call connectMongo() first.");
   return state.db;
 }
 
-/**
- * Run an operation scoped to a collection.
- */
 export async function withCollection(name, fn) {
-  const db = getDb();
-  const col = db.collection(name);
+  const col = getDb().collection(name);
   return fn(col);
 }
 
-/**
- * Ensure indexes used by Scenario/Answers/Points services (idempotent).
- * Swallow NamespaceNotFound/IndexAlreadyExists.
- */
-export async function ensureIndexes() {
-  const database = getDb();
-  const safeCreate = async (colName, specs = []) => {
-    const col = database.collection(colName);
-    for (const s of specs) {
-      try { await col.createIndex(s.key, s.options || {}); }
-      catch (e) { /* ignore index races */ }
-    }
-  };
-
-  await safeCreate("scenario_sessions", [
-    { key: { guildId: 1, channelId: 1, active: 1 }, options: { unique: true, name: "uniq_active_session" } },
-    { key: { createdAt: 1 }, options: { name: "createdAt" } },
-  ]);
-
-  await safeCreate("scenario_answers", [
-    { key: { sessionId: 1, userId: 1 }, options: { unique: true, name: "uniq_answer_per_user" } },
-    { key: { createdAt: 1 }, options: { name: "createdAt" } },
-  ]);
-
-  await safeCreate("profiles", [
-    { key: { guildId: 1, userId: 1 }, options: { unique: true, name: "uniq_profile" } },
-    { key: { points: -1 }, options: { name: "points_desc" } },
-  ]);
-}
-
-/** for tests/tools */
-export function collections() {
-  const db = getDb();
-  return {
-    media: db.collection("media"),
-    schedules: db.collection("schedules"),
-    profiles: db.collection("profiles"),
-    games: db.collection("games"),
-    greetings: db.collection("greetings"),
-    scenarios: db.collection("scenarios"),
-    scenario_sessions: db.collection("scenario_sessions"),
-    scenario_answers: db.collection("scenario_answers"),
-    personas: db.collection("personas"),
-    persona_config: db.collection("persona_config"),
-    persona_affinity: db.collection("persona_affinity"),
-  };
-}
-
 export async function closeMongo() {
-  if (state.client) {
-    await state.client.close();
-    state.client = null;
-    state.db = null;
-    console.log('[INT] Mongo closed');
-  }
+  if (!state.client) return;
+  await state.client.close();
+  state.client = null;
+  state.db = null;
+  console.log("[INT] Mongo closed");
 }
+
+// --- Backward-compatible `collections` ---
+// Make a callable function object, then wrap with Proxy to also support property access.
+function collectionGetter(name) {
+  return getDb().collection(name);
+}
+
+export const collections = new Proxy(collectionGetter, {
+  apply(_target, _thisArg, args) {
+    // allow collections('media')
+    return collectionGetter(args[0]);
+  },
+  get(_target, prop) {
+    if (typeof prop !== "string") return undefined;
+    // allow collections.media
+    return collectionGetter(prop);
+  },
+});
+
+export function getCollection(name) {
+  return getDb().collection(name);
+}
+
+export default {
+  connectMongo,
+  getDb,
+  withCollection,
+  closeMongo,
+  collections,
+  getCollection,
+};

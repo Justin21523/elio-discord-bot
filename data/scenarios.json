@@ -158,9 +158,5 @@
       "weight": 1,
       "hostPersonaName": "Elio"
     }
-  ],
-  "defaults": {
-    "revealMode": "instant",
-    "pointsOnCorrect": 10
-  }
+  ]
 }

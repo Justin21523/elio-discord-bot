@@ -1,146 +1,135 @@
-/**
- * Entry: Discord gateway + interaction router.
- */
-import { Client, GatewayIntentBits, Collection, Events } from "discord.js";
-import { bootDbIndexes } from "./boot/ensure-indexes.js";
+// /src/index.js
+// English-only code & comments.
+// Boot flow: connect Mongo → ensure indexes → start Discord client → wire services → boot scheduler → route slash commands.
+
+import { Client, Collection, Events, GatewayIntentBits } from "discord.js";
+import { ensureIndexes as bootDbIndexes } from "./db/ensure-indexes.js";
 import { CONFIG } from "./config.js";
 import { connectMongo, closeMongo } from "./db/mongo.js";
 
-// Commands (ESM)
+/* ------------------------ Commands (implemented now) ------------------------ */
 import * as dropCmd from "./commands/drop.js";
-import * as gameCmd from "./commands/game.js";
 import * as greetCmd from "./commands/greet.js";
-import * as scenarioCmd from "./commands/scenario.js";
 import * as personaCmd from "./commands/persona.js";
-import * as ragAddCmd from "./commands/rag-add.js";
-import * as ragAskCmd from "./commands/rag-ask.js";
+import * as pointsCmd from "./commands/points.js";
+import * as leaderboardCmd from "./commands/leaderboard.js";
+import * as scenarioCmd from "./commands/scenario.js";
+import * as scheduleCmd from "./commands/scheduler.js";
 
-// Services (ESM)
+/* ------------------------- Services (implemented now) ----------------------- */
+import * as webhooks from "./services/webhooks.js";
 import * as scheduler from "./services/scheduler.js";
 import * as mediaRepo from "./services/mediaRepo.js";
-import * as points from "./services/points.js";
 import * as personas from "./services/persona.js";
+import * as points from "./services/points.js";
 import * as scenarios from "./services/scenario.js";
-import * as webhooks from "./services/webhooks.js";;
-import * as jobs from './services/jobs.js';
-// AI Facade (already wired to Python service)
-import aiService from "./services/ai/index.js";
+import * as greetings from "./services/greetings.js";
 
-// Utils
-import logger from "./util/logger.js";
+/* --------------------------------- Utils ----------------------------------- */
+import { logger } from "./util/logger.js";
+import { incCounter, startTimer, METRIC_NAMES } from "./util/metrics.js";
 
+const log = logger.child({ mod: "index" });
 
+/** Build a static command router map (file → command name). */
 function buildRouter() {
   const map = new Collection();
-  map.set(dropCmd.data.name, dropCmd);
-  map.set(gameCmd.data.name, gameCmd);
-  map.set(greetCmd.data.name, greetCmd);
-  map.set(scenarioCmd.data.name, scenarioCmd);
-  map.set(personaCmd.data.name, personaCmd);
-  map.set(ragAddCmd.data.name, ragAddCmd);
-  map.set(ragAskCmd.data.name, ragAskCmd);
+  const mods = [
+    dropCmd,
+    greetCmd,
+    personaCmd,
+    pointsCmd,
+    leaderboardCmd,
+    scenarioCmd,
+    scheduleCmd,
+  ];
+  for (const mod of mods) {
+    if (mod?.data?.name && typeof mod?.execute === "function") {
+      map.set(mod.data.name, mod);
+    }
+  }
   return map;
 }
 
-await bootDbIndexes();
-
-/** Bootstrap */
 async function main() {
   if (!CONFIG.DISCORD_TOKEN) {
     console.error("[ERR] Missing DISCORD_TOKEN");
     process.exit(1);
   }
 
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-  // ...
+  // 1) Connect DB + ensure indexes (once)
   await connectMongo();
-  scheduler.setClient(client);
-  webhooks.setClient(client);
-  scheduler.setJobRunner(jobs.run);
-  await scheduler.bootFromDb();
+  try {
+    await bootDbIndexes();
+  } catch (e) {
+    console.warn("[WARN] ensure-indexes skipped/failed (non-fatal):", String(e));
+  }
 
-  client.once(Events.ClientReady, async () => {
-    console.log("[INT] Logged in as", client.user.tag);
-    try {
-      await connectMongo();
-
-      if (typeof scheduler.armAll === "function") {
-        await scheduler.armAll(client);
-        console.log("[INT] Scheduler armed from DB");
-      } else {
-        console.log("[INT] Scheduler.armAll not present, skipping.");
-      }
-    } catch (e) {
-      console.error("[ERR] Bootstrap failed:", e);
-    }
+  // 2) Start Discord client (minimal intents we need now)
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
   });
 
+  // 3) Wire services that need the client
+  scheduler.setClient(client);
+  webhooks.setClient(client);
+  // (Optional) if you later expose a generic job runner:
+  // scheduler.setJobRunner(jobs.run);
+
+  // 4) Boot in-memory schedules from DB
+  await scheduler.bootFromDb().catch((e) =>
+    console.warn("[WARN] bootFromDb failed (non-fatal):", String(e))
+  );
+
+  client.once(Events.ClientReady, () => {
+    console.log("[INT] Logged in as", client.user.tag);
+  });
+
+  // 5) Router map (fixed names)
   const router = buildRouter();
 
-  // Component/interaction handler
+  // 6) Interaction handler (slash commands only)
   client.on("interactionCreate", async (interaction) => {
-    if (interaction.isButton()) return;
+    if (!interaction.isChatInputCommand()) return;
+
+    const stop = startTimer(METRIC_NAMES.command_latency_seconds, {
+      command: interaction.commandName,
+    });
 
     try {
-      if (!interaction.isChatInputCommand()) return;
+      const mod = router.get(interaction.commandName);
+      if (!mod) return;
 
-      const cmd = router.get(interaction.commandName);
-      if (!cmd) return;
-
-      // Provide common context via "services" bag if your commands expect it
+      // Services bag (kept for parity; commands may ignore it)
       const services = {
         scheduler,
         mediaRepo,
         points,
         personas,
         scenarios,
+        greetings,
         webhooks,
-        ai: aiService, // <— AI Facade (calls Python service)
-        mongo: {
-          collections: interaction.client?.mongo?.collections, // if you attach them on connectMongo
-        },
       };
 
-      await cmd.execute(interaction, services);
-    } catch (err) {
-      logger.error("[ERR] interaction handler failed", { err: String(err) });
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "❌ Something went wrong." });
-      } else {
-        await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
-      }
-    }
-  });
-
-
-  // Optional: a DM test hook or messageCreate hook you already had
-  // Example agent test (keep your guards as-is)
-  client.on("messageCreate", async (message) => {
-    if (message.author.bot) return;
-    if (message.content === "!test-ai") {
+      await mod.execute(interaction, services);
+      incCounter(METRIC_NAMES.commands_total, {
+        command: interaction.commandName,
+      });
+      stop({ command: interaction.commandName });
+    } catch (e) {
+      console.error("[ERR] command error:", interaction.commandName, e);
+      stop({ command: interaction.commandName });
       try {
-        const res = await aiService.agentTask("daily_digest", {
-          items: [
-            { title: "Test News 1", url: "https://example.com/1", snippet: "Test snippet 1" },
-            { title: "Test News 2", url: "https://example.com/2", snippet: "Test snippet 2" },
-          ],
-          maxItems: 2,
-          guildId: message.guildId,
-        });
-        if (res.ok) {
-          await message.reply(`✅ AI Agent: ${res.data.answer.slice(0, 400)}`);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({ content: "❌ Something went wrong." });
         } else {
-          await message.reply(`❌ AI Agent error: ${res.error.code} — ${res.error.message}`);
+          await interaction.reply({ content: "❌ Something went wrong.", ephemeral: true });
         }
-      } catch (e) {
-        await message.reply(`❌ Error: ${String(e)}`);
-      }
+      } catch {}
     }
   });
 
-  // Graceful shutdown
-  process.on("unhandledRejection", (r) => console.error("[ERR] Unhandled", r));
+  // 7) Graceful shutdown
   async function shutdown(sig) {
     try {
       console.log(`[INT] Caught ${sig}, shutting down...`);
@@ -150,9 +139,11 @@ async function main() {
       process.exit(0);
     }
   }
+  process.on("unhandledRejection", (r) => console.error("[ERR] Unhandled:", r));
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
+  // 8) Login
   await client.login(CONFIG.DISCORD_TOKEN);
 }
 

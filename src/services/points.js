@@ -1,77 +1,198 @@
-// Domain Service: Points / Levels
-// English-only. In-memory store.
-import { withCollection } from "../db/mongo.js";
-import { incCounter } from "../util/metrics.js";
+// English-only code & comments.
+// Domain service: Points & Levels
+// - Storage: profiles collection (see DATABASE_SCHEMA.md)
+// - Public API returns Result<T> (never throws across boundary)
 
-const LEVEL_THRESHOLDS = [0, 50, 120, 250, 500, 900, 1500]; // simple defaults
+import { collections, getDb } from '../db/mongo.js';
+import { incCounter, startTimer, METRIC_NAMES } from '../util/metrics.js';
+import { logger as baseLogger } from '../util/logger.js';
 
-const _users = new Map(); // key: `${guildId}:${userId}` -> { points, lastAwardAt }
+const log = baseLogger.child({ svc: 'points' });
 
-function ok(data) { return { ok: true, data }; }
-function err(code, message, cause, details) { return { ok: false, error: { code, message, cause, details } }; }
-
-export async function award({ guildId, userId, amount, reason = "", sourceRef = null, seasonId = null }) {
-  try {
-    if (!guildId || !userId || !Number.isFinite(amount)) {
-      return err("VALIDATION_FAILED", "Invalid award payload");
-    }
-    const now = new Date();
-    const res = await withCollection("profiles", async (col) => {
-      const update = {
-        $inc: { points: amount },
-        $setOnInsert: { createdAt: now },
-        $set: { updatedAt: now, seasonId: seasonId || null },
-        $push: { history: { t: now, amount, reason, sourceRef } },
-      };
-      const { value } = await col.findOneAndUpdate(
-        { guildId, userId },
-        update,
-        { upsert: true, returnDocument: "after" }
-      );
-      return value;
-    });
-
-    incCounter("commands_total", { command: "points.award" });
-    return ok({ profile: decorateLevel(res) });
-  } catch (cause) {
-    return err("DB_ERROR", "Award points failed", cause);
-  }
+/**
+ * Result helpers
+ */
+function ok(data) { return Promise.resolve({ ok: true, data }); }
+function err(code, message, details) {
+  return Promise.resolve({ ok: false, error: { code, message, details } });
 }
 
-export async function leaderboard({ guildId, seasonId = null, limit = 10 }) {
-  try {
-    const rows = await withCollection("profiles", async (col) => {
-      const q = { guildId };
-      if (seasonId !== null) q.seasonId = seasonId;
-      return col.find(q).sort({ points: -1 }).limit(limit).toArray();
-    });
+/**
+ * Default level thresholds (cumulative points required for each level).
+ * Example: level = thresholds.findIndex(t > points) - 1
+ * You can override per guild via setLevelThresholds() if you later add a config collection.
+ */
+const DEFAULT_THRESHOLDS = [0, 10, 30, 60, 100, 160, 230, 320, 430, 560, 700];
 
-    incCounter("commands_total", { command: "points.leaderboard" });
-    return ok({ entries: rows.map(decorateLevel) });
-  } catch (cause) {
-    return err("DB_ERROR", "Leaderboard query failed", cause);
-  }
-}
-
-export async function getProfile({ guildId, userId }) {
-  try {
-    const doc = await withCollection("profiles", (col) => col.findOne({ guildId, userId }));
-    if (!doc) return err("NOT_FOUND", "Profile not found");
-    return ok({ profile: decorateLevel(doc) });
-  } catch (cause) {
-    return err("DB_ERROR", "Get profile failed", cause);
-  }
-}
-
-export function currentLevel(points) {
+/**
+ * Internal: compute level from points and thresholds.
+ */
+function computeLevel(points, thresholds = DEFAULT_THRESHOLDS) {
   let lvl = 0;
-  for (let i = 0; i < LEVEL_THRESHOLDS.length; i++) {
-    if (points >= LEVEL_THRESHOLDS[i]) lvl = i;
+  for (let i = 0; i < thresholds.length; i++) {
+    if (points >= thresholds[i]) lvl = i;
+    else break;
   }
-  return { level: lvl, nextAt: LEVEL_THRESHOLDS[lvl + 1] ?? null };
+  return lvl;
 }
 
-function decorateLevel(profile) {
-  const { level, nextAt } = currentLevel(profile.points || 0);
-  return { ...profile, level, nextLevelAt: nextAt };
+/**
+ * Optionally load per-guild thresholds.
+ * For now, return default. Designed for future extension (points_config collection).
+ */
+async function loadThresholdsForGuild(_guildId) {
+  // Future: read from db.collection('points_config') if exists.
+  return DEFAULT_THRESHOLDS;
 }
+
+/**
+ * Ensure a profile exists, returns the profile document.
+ */
+async function _ensureProfile(guildId, userId) {
+  const col = collections('profiles');
+  const now = new Date();
+  await col.updateOne(
+    { guildId, userId },
+    { $setOnInsert: { points: 0, level: 0, streak: 0, createdAt: now }, $set: { updatedAt: now } },
+    { upsert: true }
+  );
+  return await col.findOne({ guildId, userId });
+}
+
+/**
+ * Public: award points to a user and recompute level.
+ */
+export async function award(guildId, userId, delta) {
+  const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.award' });
+  try {
+    if (!guildId || !userId) return err('BAD_REQUEST', 'guildId/userId is required');
+    const n = Number(delta);
+    if (!Number.isFinite(n)) return err('BAD_REQUEST', 'delta must be a number');
+
+    const col = collections('profiles');
+    const thresholds = await loadThresholdsForGuild(guildId);
+
+    // Upsert points first
+    const res = await col.findOneAndUpdate(
+      { guildId, userId },
+      { $inc: { points: n }, $setOnInsert: { createdAt: new Date() }, $set: { updatedAt: new Date() } },
+      { returnDocument: 'after', upsert: true }
+    );
+    const after = res.value || await _ensureProfile(guildId, userId);
+    const newLevel = computeLevel(after.points, thresholds);
+
+    // If level changed, persist
+    if (after.level !== newLevel) {
+      await col.updateOne({ guildId, userId }, { $set: { level: newLevel, updatedAt: new Date() } });
+      after.level = newLevel;
+    }
+
+    incCounter(METRIC_NAMES.jobs_total, { kind: 'points_award' }, 1);
+    stop({ tool: 'points.award' });
+    return ok({ points: after.points, level: after.level });
+  } catch (e) {
+    log.error('award failed', { e: String(e), guildId, userId, delta });
+    stop({ tool: 'points.award' });
+    return err('DB_ERROR', 'Failed to award points');
+  }
+}
+
+/**
+ * Public: get (or create) the profile.
+ */
+export async function getProfile(guildId, userId) {
+  const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.getProfile' });
+  try {
+    const prof = await _ensureProfile(guildId, userId);
+    stop();
+    return ok(prof);
+  } catch (e) {
+    log.error('getProfile failed', { e: String(e), guildId, userId });
+    stop();
+    return err('DB_ERROR', 'Failed to get profile');
+  }
+}
+
+/**
+ * Public: leaderboard by points (desc).
+ */
+export async function leaderboard(guildId, limit = 10) {
+  const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.leaderboard' });
+  try {
+    const col = collections('profiles');
+    const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
+    const cur = col.find({ guildId }).sort({ points: -1, updatedAt: -1 }).limit(n);
+    const docs = await cur.toArray();
+    stop();
+    return ok(docs.map(d => ({ userId: d.userId, points: d.points || 0, level: d.level || 0 })));
+  } catch (e) {
+    log.error('leaderboard failed', { e: String(e), guildId, limit });
+    stop();
+    return err('DB_ERROR', 'Failed to get leaderboard');
+  }
+}
+
+/**
+ * Public: returns computed level for a raw points number (utility).
+ */
+export async function currentLevel(points) {
+  try {
+    return ok(computeLevel(Number(points) || 0));
+  } catch {
+    return err('VALIDATION_FAILED', 'invalid points');
+  }
+}
+
+/**
+ * Optional admin: set points directly (without delta).
+ */
+export async function setPoints(guildId, userId, points) {
+  const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.setPoints' });
+  try {
+    const col = collections('profiles');
+    const p = Math.max(0, Math.floor(Number(points) || 0));
+    const thresholds = await loadThresholdsForGuild(guildId);
+    const level = computeLevel(p, thresholds);
+    await col.updateOne(
+      { guildId, userId },
+      { $set: { points: p, level, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+    stop();
+    return ok({ points: p, level });
+  } catch (e) {
+    log.error('setPoints failed', { e: String(e), guildId, userId, points });
+    stop();
+    return err('DB_ERROR', 'Failed to set points');
+  }
+}
+
+/**
+ * Seasonal reset (keep document; zero points/streak).
+ */
+export async function seasonalReset(guildId) {
+  const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.seasonalReset' });
+  try {
+    const col = collections('profiles');
+    const now = new Date();
+    const res = await col.updateMany(
+      { guildId },
+      { $set: { points: 0, level: 0, streak: 0, updatedAt: now } }
+    );
+    stop();
+    return ok({ matched: res.matchedCount, modified: res.modifiedCount });
+  } catch (e) {
+    log.error('seasonalReset failed', { e: String(e), guildId });
+    stop();
+    return err('DB_ERROR', 'Failed to reset season');
+  }
+}
+
+export default {
+  award,
+  getProfile,
+  leaderboard,
+  currentLevel,
+  setPoints,
+  seasonalReset,
+};

@@ -4,6 +4,7 @@
 // Centralized runtime configuration for the Discord bot and the AI sidecar.
 // Reads from process.env, provides sane defaults for local dev.
 // IMPORTANT: Do not log secrets.
+import 'dotenv/config';
 
 function n(v, d) { const x = Number(v); return Number.isFinite(x) ? x : d; }
 
@@ -14,7 +15,7 @@ export const CONFIG = Object.freeze({
   GUILD_ID_DEV: process.env.GUILD_ID_DEV,
 
   // --- MongoDB ---
-  MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017',
+  MONGODB_URI: process.env.MONGODB_URI || 'mongodb+srv://communiverse_user:elioversebot@cluster0.1s3kk.mongodb.net/communiverse_bot?retryWrites=true&w=majority&appName=communiverse',
   DB_NAME: process.env.DB_NAME || 'communiverse_bot',
 
   // --- Game / Points ---
@@ -23,7 +24,7 @@ export const CONFIG = Object.freeze({
   // --- AI sidecar (HTTP) ---
   ai: {
     enabled: String(process.env.AI_ENABLED || 'true') === 'true',
-    baseUrl: (process.env.AI_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, ''),
+    baseUrl: (process.env.AI_API_BASE_URL || 'http://ai-python:8888').replace(/\/+$/, ''),
     timeoutMs: n(process.env.AI_API_TIMEOUT_MS, 15000),
     retryAttempts: n(process.env.AI_API_RETRY_ATTEMPTS, 2),
     retryBackoffMs: n(process.env.AI_API_RETRY_BACKOFF_MS, 400),
@@ -36,7 +37,7 @@ export const CONFIG = Object.freeze({
 
   // --- LLM (OpenAI-compatible endpoint like vLLM/TGI/Ollama proxy) ---
   llm: {
-    apiBase: (process.env.LLM_API_BASE || 'http://localhost:11434/v1/').replace(/\/+$/, ''),
+    apiBase: (process.env.LLM_API_BASE || 'http://ai-python:8888').replace(/\/+$/, ''),
     apiKey: process.env.LLM_API_KEY || 'ollama', // some endpoints don’t need real keys
     // Model preference order; the sidecar can still override based on availability.
     model: process.env.LLM_MODEL || process.env.LLM__MODEL || 'Qwen/Qwen2.5-7B-Instruct',
@@ -53,7 +54,7 @@ export const CONFIG = Object.freeze({
 
   // --- VLM (Vision models) ---
   vlm: {
-    apiBase: (process.env.VLM_API_BASE || 'http://localhost:11434/v1/').replace(/\/+$/, ''),
+    apiBase: (process.env.VLM_API_BASE || 'http://ai-python:8888/').replace(/\/+$/, ''),
     apiKey: process.env.VLM_API_KEY || 'ollama',
     model: process.env.VLM_MODEL || 'llava-1.6',
     timeoutMs: n(process.env.VLM_TIMEOUT_MS, 45000),
@@ -64,7 +65,7 @@ export const CONFIG = Object.freeze({
 
   // --- Embeddings ---
   embeddings: {
-    apiBase: (process.env.EMBEDDINGS_API_BASE || 'http://localhost:8000').replace(/\/+$/, ''),
+    apiBase: (process.env.EMBEDDINGS_API_BASE || 'http://ai-python:8888').replace(/\/+$/, ''),
     model: process.env.EMBEDDINGS_MODEL || 'bge-m3',
     // known dims: bge-m3: 1024, gte-large-zh-en: 1024, e5-large-v2: 1024, all-MiniLM-L6-v2: 384
     dim: n(process.env.EMBEDDINGS_DIM, 1024),
@@ -75,7 +76,7 @@ export const CONFIG = Object.freeze({
   webSearch: {
     provider: (process.env.WEB_SEARCH_PROVIDER || 'brave').toLowerCase(), // 'brave' | 'serpapi' | 'searxng'
     braveApiKey: process.env.BRAVE_API_KEY || '',
-    baseUrl: (process.env.SEARXNG_BASE_URL || 'http://localhost:8888').replace(/\/+$/, ''),
+    baseUrl: (process.env.SEARXNG_BASE_URL || 'http://ai-python:8888').replace(/\/+$/, ''),
     timeoutMs: n(process.env.WEB_SEARCH_TIMEOUT_MS, 10000),
     cacheTtl: n(process.env.WEB_SEARCH_CACHE_TTL, 3600),
   },
@@ -92,7 +93,16 @@ export const CONFIG = Object.freeze({
     chunkOverlap: n(process.env.RAG_CHUNK_OVERLAP, 120),
     provider: (process.env.RAG_PROVIDER || 'atlas').toLowerCase(), // 'atlas' | 'faiss'
   },
+  RAG_EMBED_DIM: Number(process.env.RAG_EMBED_DIM || 1024),
+  RAG_SEED_ON_BOOT: String(process.env.RAG_SEED_ON_BOOT || 'false').toLowerCase() === 'true',
 
   // --- Metrics HTTP ---
   METRICS_PORT: n(process.env.METRICS_PORT, 9090),
+  // Logging
+  LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+
+  // AI Sidecar (for /ai-check)
+  AI_HEALTH_URL: process.env.AI_HEALTH_URL || 'http://ai-python:8888/health',
+  AI_HEALTH_TIMEOUT_MS: Number(process.env.AI_HEALTH_TIMEOUT_MS || 4000),
+
 });
