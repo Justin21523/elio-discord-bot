@@ -1,127 +1,141 @@
 // /scenario start|answer|reveal
 // English-only.
 
-import { SlashCommandBuilder } from "discord.js";
-import * as scenarios from "../services/scenario.js";
-import * as Points from "../services/points.js";
-import { formatErrorEmbed, safeEdit } from "../util/replies.js";
-import { incCounter, observeHistogram } from "../util/metrics.js";
+import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ComponentType } from 'discord.js';
+import * as scenarios from '../services/scenario.js';
+import { formatErrorEmbed, safeEdit, ensureDeferred } from '../util/replies.js';
+import { incCounter} from "../util/metrics.js";
 
 export const data = new SlashCommandBuilder()
-  .setName("scenario")
-  .setDescription("Play a scenario quiz or speedrun.")
-  .addSubcommand(sc =>
-    sc.setName("start")
-      .setDescription("Start a scenario session")
-      .addStringOption(o => o.setName("tag").setDescription("Scenario tag").setRequired(false))
-      .addStringOption(o => o.setName("mode").setDescription("Mode: quiz|speedrun").setRequired(false)))
-  .addSubcommand(sc =>
-    sc.setName("answer")
-      .setDescription("Answer the current question")
-      .addIntegerOption(o => o.setName("index").setDescription("Answer index (0-3)").setRequired(false))
-      .addStringOption(o => o.setName("text").setDescription("Answer text").setRequired(false)))
-  .addSubcommand(sc =>
-    sc.setName("reveal").setDescription("Reveal the answer & stats"))
-  .addSubcommand(sc =>
-    sc.setName("cancel").setDescription("Cancel the active session (admin)"));
+  .setName('scenario')
+  .setDescription('Play a scenario quiz or speedrun.')
+  .addSubcommand(sc => sc
+    .setName('start')
+    .setDescription('Start a scenario session')
+    .addStringOption(o => o.setName('tag').setDescription('Scenario tag').setRequired(false))
+    .addIntegerOption(o => o.setName('duration').setDescription('Duration seconds (default 30)').setRequired(false))
+  )
+  .addSubcommand(sc => sc
+    .setName('reveal')
+    .setDescription('Reveal the answer & stats')
+  )
+  .addSubcommand(sc => sc
+    .setName('cancel')
+    .setDescription('Cancel the active session (admin)')
+  )
+  .setDMPermission(false);
+
 
 export async function execute(interaction) {
-  const t0 = Date.now();
-  await interaction.deferReply({ ephemeral: false });
+  const startAt = Date.now();
+  const sub = interaction.options.getSubcommand();
   const guildId = interaction.guildId;
+  const channelId = interaction.channelId;
   const userId = interaction.user.id;
 
   try {
-    await interaction.deferReply({ ephemeral: false }); // ≤3s SLO
-    const sub = interaction.options.getSubcommand();
+    await ensureDeferred(interaction, false);
 
-    if (sub === "start") {
-      const tag = interaction.options.getString("tag") || null;
-      const mode = interaction.options.getString("mode") || "quiz";
-      const result = await scenarios.startSession({ guildId, channelId, tag, mode });
+    if (sub === 'start') {
+      const tag = interaction.options.getString('tag') || null;
+      const duration = interaction.options.getInteger('duration') || 30;
 
-      if (!result.ok) return safeEdit(interaction, formatErrorEmbed(result.error, "Failed to start"));
+      const result = await scenarios.startSession({ guildId, channelId, tag, durationSec: duration });
+      if (!result.ok) return safeEdit(interaction, formatErrorEmbed(result.error, 'failed to start'));
+
       const s = result.data.session;
+      const letters = ['A','B','C','D'];
+      const title = `Scenario • ${s.hostPersonaName || 'Elio'} • ${s.durationSec}s`;
 
-      await safeEdit(interaction, {
-        embeds: [{
-          title: "Scenario Started",
-          description: `**Mode:** \`${s.mode}\`\n**Q:** ${s.prompt}\n\n${s.options.map((t, i) => `\`${i}\` • ${t}`).join("\n")}`,
-          color: 0x7cc5ff,
-        }],
+      const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setColor(0x72C5FF)
+        .setDescription(`**Q:** ${s.prompt}\n\n${s.options.map((o, i) => `**${letters[i]}** ${o}`).join('\n')}`)
+        .setFooter({ text: 'Answer by clicking a button below' });
+
+      const row = new ActionRowBuilder().addComponents(
+        ...s.options.map((_, i) =>
+          new ButtonBuilder()
+            .setCustomId(`scn:${s._id}:${i}`)
+            .setLabel(letters[i])
+            .setStyle(ButtonStyle.Primary)
+        )
+      );
+
+      const msg = await interaction.channel.send({ embeds: [embed], components: [row] });
+      await safeEdit(interaction, { content: `Question started for **${s.durationSec}s**. Good luck!`, embeds: [] });
+
+      // Collector for button clicks
+      const collector = msg.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        time: s.durationSec * 1000
       });
 
-    }
-
-    if (sub === 'answer') {
-      const index = interaction.options.getInteger("index");
-      const text = interaction.options.getString("text");
-      const active = await ScenarioActiveInChannel({ guildId, channelId });
-      if (!active) return safeEdit(interaction, formatErrorEmbed({ code: "NOT_FOUND", message: "No active session here." }));
-
-      const result = await scenarios.answer({ sessionId: active._id, userId, answerIndex: index, freeText: text });
-      if (!result.ok) return safeEdit(interaction, formatErrorEmbed(result.error, "Answer failed"));
-
-      const { correct, closed } = result.data;
-      if (correct && closed) {
-        // award winner
-        await Points.award({ guildId, userId, amount: 10, reason: "scenario_winner", sourceRef: String(active._id) });
-      }
-
-      await safeEdit(interaction, {
-        embeds: [{
-          title: correct ? "✅ Correct!" : "❌ Not correct",
-          description: closed ? "This round is now closed. Use `/scenario reveal`." : "Keep trying!",
-          color: correct ? 0x31d0aa : 0xff8a7a,
-        }],
+      collector.on('collect', async (btn) => {
+        // Ignore other channels/guilds
+        if (btn.channelId !== channelId) return;
+        // Parse customId
+        const [_, sid, idx] = String(btn.customId).split(':');
+        if (sid !== String(s._id)) {
+          return btn.reply({ content: 'This question is no longer active.', ephemeral: true });
+        }
+        const res = await scenarios.answer({
+          guildId, channelId, userId: btn.user.id, index: Number(idx)
+        });
+        if (!res.ok) {
+          return btn.reply({ content: `❌ ${res.error.message}`, ephemeral: true });
+        }
+        if (res.data.correct) {
+          const bonus = res.data.first ? ` (+${res.data.scored} pts, FIRST!)` : ` (+${res.data.scored} pts)`;
+          return btn.reply({ content: `✅ Correct${bonus}`, ephemeral: true });
+        } else {
+          return btn.reply({ content: `❌ Wrong answer`, ephemeral: true });
+        }
       });
 
+      collector.on('end', async () => {
+        // Auto reveal after timeout
+        const rev = await scenarios.reveal({ guildId, channelId });
+        if (!rev.ok) {
+          return interaction.channel.send({ content: `⚠️ Reveal failed: ${rev.error.message}` });
+        }
+        const r = rev.data;
+        const revealEmbed = new EmbedBuilder()
+          .setTitle('Answer Revealed')
+          .setColor(0x3FB950)
+          .setDescription(`**Q:** ${r.prompt}\n\n**A:** ${letters[r.correctIndex]} — ${r.options[r.correctIndex]}\n\n` +
+            `Total answers: **${r.totalAnswers}**, correct: **${r.correctCount}**`)
+          .setFooter({ text: 'Great work!' });
+
+        await interaction.channel.send({ embeds: [revealEmbed] });
+      });
+
+      incCounter('commands_total', { command: 'scenario.start' });
+      return;
     }
 
     if (sub === 'reveal') {
-      const activeOrLast = await ScenarioActiveInChannel({ guildId, channelId, allowLast: true });
-      if (!activeOrLast) return safeEdit(interaction, formatErrorEmbed({ code: "NOT_FOUND", message: "No session found." }));
-
-      const result = await scenarios.reveal({ sessionId: activeOrLast._id });
-      if (!result.ok) return safeEdit(interaction, formatErrorEmbed(result.error, "Reveal failed"));
-
-      const { prompt, options, correctIndex, winnerUserId, totalAnswers, correctCount, active } = result.data;
-      await safeEdit(interaction, {
-        embeds: [{
-          title: "Reveal",
-          description: `**Q:** ${prompt}\n**A:** \`${correctIndex}\` • ${options[correctIndex]}\n\nWinner: ${winnerUserId ? `<@${winnerUserId}>` : "_none_"}\nAnswers: ${correctCount}/${totalAnswers}\nStatus: ${active ? "Active" : "Closed"}`,
-          color: 0xb4e37d,
-        }],
-      });
-    } else if (sub === "cancel") {
-      const result = await scenarios.cancel({ guildId, channelId });
-      if (!result.ok) return safeEdit(interaction, formatErrorEmbed(result.error, "Cancel failed"));
-
-      await safeEdit(interaction, {
-        embeds: [{ title: "Session cancelled", color: 0xffcc00 }],
-      });
+      const rev = await scenarios.reveal({ guildId, channelId });
+      if (!rev.ok) return safeEdit(interaction, formatErrorEmbed(rev.error, 'Reveal failed'));
+      const r = rev.data;
+      const letters = ['A','B','C','D'];
+      const revealEmbed = {
+        title: 'Answer Revealed (manual)',
+        color: 0x3FB950,
+        description: `**Q:** ${r.prompt}\n\n**A:** ${letters[r.correctIndex]} — ${r.options[r.correctIndex]}\n\n` +
+          `Total answers: **${r.totalAnswers}**, correct: **${r.correctCount}**`
+      };
+      await safeEdit(interaction, { embeds: [revealEmbed] });
+      return;
     }
 
-    incCounter("commands_total", { command: "scenario" });
-  } catch (error) {
-    await safeEdit(interaction, formatErrorEmbed({ code: "UNKNOWN", message: String(error) }, "Scenario error"));
-  } finally {
-    const ms = (Date.now() - startedAt) / 1000;
-    observeHistogram("command_latency_seconds", ms, { command: "scenario" });
-    // Log with context (no secrets)
-    console.log("[CMD][scenario]",
-      { guildId, channelId, userId, latency_s: ms.toFixed(3) });
+    if (sub === 'cancel') {
+      const res = await scenarios.cancel({ guildId, channelId });
+      if (!res.ok) return safeEdit(interaction, formatErrorEmbed(res.error, 'Cancel failed'));
+      await safeEdit(interaction, { content: 'Session cancelled.' });
+      return;
+    }
+  } catch (e) {
+    await safeEdit(interaction, formatErrorEmbed({ code: 'UNKNOWN', message: 'Scenario command crashed' }));
   }
-}
-
-/**
- * Helper: find active session in channel, or last session if allowLast=true.
- */
-async function ScenarioActiveInChannel({ guildId, channelId, allowLast = false }) {
-  const { withCollection } = await import("../db/mongo.js");
-  const col = "scenario_sessions";
-  const active = await withCollection(col, (c) => c.findOne({ guildId, channelId, active: true }));
-  if (active) return active;
-  if (!allowLast) return null;
-  return withCollection(col, (c) => c.find({ guildId, channelId }).sort({ createdAt: -1 }).limit(1).next());
 }

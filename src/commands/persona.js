@@ -1,51 +1,75 @@
-// Slash command: /persona "text" [name] [style]
-// English-only.
+// src/commands/persona.js
+// User-facing persona interactions: /persona meet, /persona act
 
-import { SlashCommandBuilder } from 'discord.js';
-import { compose } from '../services/ai/persona.js';
-import { scan } from '../services/ai/moderation.js';
-import { incCounter, observeHistogram } from '../util/metrics.js';
-import { logError } from '../util/logger.js';
+import { SlashCommandBuilder } from "discord.js";
+import * as Persona from "../services/persona.js";
+import { formatErrorEmbed, safeEdit } from "../util/replies.js";
+import { incCounter, observeHistogram } from "../util/metrics.js";
 
 export const data = new SlashCommandBuilder()
-  .setName('persona')
-  .setDescription('Reply in a configured persona.')
-  .addStringOption(o => o.setName('text').setDescription('User text').setRequired(true))
-  .addStringOption(o => o.setName('name').setDescription('Persona name (default Elio)'))
-  .addStringOption(o => o.setName('style').setDescription('Persona style (default playful, supportive)'))
-  .addIntegerOption(o => o.setName('max').setDescription('Max length (default 180)'));
+  .setName("persona")
+  .setDescription("Meet and interact with a persona.")
+  .addSubcommand(sc =>
+    sc.setName("meet")
+      .setDescription("Invite the persona to speak")
+      .addStringOption(o => o.setName("name").setDescription("Persona name").setRequired(true))
+  )
+  .addSubcommand(sc =>
+    sc.setName("act")
+      .setDescription("Perform an action to change affinity")
+      .addStringOption(o => o.setName("name").setDescription("Persona name").setRequired(true))
+      .addStringOption(o => o.setName("action").setDescription("Action")
+        .addChoices(
+          { name: "joke", value: "joke" },
+          { name: "gift", value: "gift" },
+          { name: "help", value: "help" },
+          { name: "challenge", value: "challenge" }
+        ).setRequired(true))
+  )
+  .setDMPermission(false);
 
 export async function execute(interaction) {
-  const t0 = Date.now();
-  await interaction.deferReply({ ephemeral: false });
+  const startedAt = Date.now();
+  const sub = interaction.options.getSubcommand();
+  const guildId = interaction.guildId;
+  const channelId = interaction.channelId;
+  const name = interaction.options.getString("name", true);
+  const persona = { id: name.toLowerCase(), name };
 
-  const text = interaction.options.getString('text', true);
-  const name = interaction.options.getString('name') ?? 'Elio';
-  const style = interaction.options.getString('style') ?? 'playful, supportive';
-  const max = interaction.options.getInteger('max') ?? 180;
+  try {
+    await interaction.deferReply({ ephemeral: false });
 
-  // pre-scan
-  const m = await scan(text);
-  if (!m.ok) {
-    logError('[CMD]', { guildId: interaction.guildId, channelId: interaction.channelId, userId: interaction.user.id, command: 'persona', error: m.error });
-    incCounter('commands_total', { command: 'persona', outcome: 'error' });
-    await interaction.editReply('❌ Moderation unavailable.');
-    return;
+    if (sub === "meet") {
+      const res = await Persona.meet({ guildId, channelId, persona });
+      if (!res.ok) return safeEdit(interaction, formatErrorEmbed(res.error, "Meet failed"));
+      await safeEdit(interaction, { content: `🎭 **${name}** joined the chat.` });
+      incCounter("commands_total", { command: "persona.meet.cmd" });
+    }
+
+    if (sub === "act") {
+      const action = interaction.options.getString("action", true);
+      const res = await Persona.act({ guildId, userId: interaction.user.id, persona, action });
+      if (!res.ok) return safeEdit(interaction, formatErrorEmbed(res.error, "Action failed"));
+
+      const p = res.data.profile;
+      await safeEdit(interaction, {
+        embeds: [{
+          title: `Persona • ${name}`,
+          description:
+            `Action: **${action}**\n` +
+            `Delta: \`F${res.data.delta.friendship} / T${res.data.delta.trust} / D${res.data.delta.dependence}\`\n` +
+            `Now: **F${p.friendship} / T${p.trust} / D${p.dependence}** • _${p.levelHint}_`,
+          color: 0x6aa7ff,
+        }],
+      });
+      incCounter("commands_total", { command: "persona.act.cmd" });
+    }
+
+  } catch (error) {
+    await safeEdit(interaction, formatErrorEmbed({ code: "UNKNOWN", message: String(error) }, "Persona error"));
+  } finally {
+    const ms = (Date.now() - startedAt) / 1000;
+    observeHistogram("command_latency_seconds", ms, { command: `persona.${sub}` });
+    console.log("[CMD][persona]", { guildId, sub, latency_s: ms.toFixed(3) });
   }
-  if (m.data.blocked) {
-    incCounter('commands_total', { command: 'persona', outcome: 'blocked' });
-    await interaction.editReply('⚠️ Your text was flagged by moderation.');
-    return;
-  }
-
-  const res = await compose(text, { name, style }, max);
-  if (!res.ok) {
-    incCounter('commands_total', { command: 'persona', outcome: 'error' });
-    await interaction.editReply(`❌ Persona error: ${res.error.message}`);
-  } else {
-    incCounter('commands_total', { command: 'persona', outcome: 'ok' });
-    await interaction.editReply(res.data.reply ?? '(no reply)');
-  }
-
-  observeHistogram('command_latency_seconds', (Date.now() - t0) / 1000, { command: 'persona' });
 }

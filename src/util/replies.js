@@ -4,8 +4,21 @@ export function ok(data) {
   return { ok: true, data };
 }
 
-export function fail(code, message, cause, details) {
-  return { ok: false, error: { code, message, cause, details } };
+export async function fail(interaction, error) {
+  const content = `❌ ${error?.message || "Something went wrong."}\nErrorCode: ${error?.code || "UNKNOWN"}`;
+
+  try {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.reply({ content, ephemeral: true });
+    } else {
+      await interaction.editReply({ content });
+    }
+  } catch {
+    // Last resort: followUp
+    try {
+      await interaction.followUp({ content, ephemeral: true });
+    } catch { /* swallow */ }
+  }
 }
 
 export async function defer(i, { ephemeral = false } = {}) {
@@ -114,5 +127,21 @@ export async function safeEdit(interaction, payload) {
     return await interaction.reply(payload);
   } catch {
     // swallow discord edit race
+  }
+}
+
+/**
+ * Ensure this interaction is deferred exactly once.
+ * Safe to call multiple times in the same handler.
+ * @param {import('discord.js').CommandInteraction} interaction
+ * @param {boolean} ephemeral
+ */
+export async function ensureDeferred(interaction, ephemeral = false) {
+  try {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ ephemeral });
+    }
+  } catch {
+    // ignore; if already replied/deferred, discord.js may throw
   }
 }

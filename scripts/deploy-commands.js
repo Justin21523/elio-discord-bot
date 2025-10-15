@@ -1,51 +1,59 @@
 // /scripts/deploy-commands.js
-// Guild-scoped command registration. Lists commands explicitly.
+// English-only code & comments.
+// Deploy slash commands to a single dev guild (safer & faster).
+// Reads all /src/commands/*.js modules that export { data, execute } and registers them.
 
-import "dotenv/config";
-import { REST, Routes } from "discord.js";
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import 'dotenv/config';
+import { REST, Routes } from 'discord.js';
+import { CONFIG } from '../src/config.js';
 
-import * as dropCmd from "../src/commands/drop.js";
-import * as gameCmd from "../src/commands/game.js";
-import * as greetCmd from "../src/commands/greet.js";
-import * as scenarioCmd from "../src/commands/scenario.js";
-import * as personaCmd from "../src/commands/persona.js";
-// ✅ add the RAG commands
-import * as ragAddCmd from "../src/commands/rag-add.js";
-import * as ragAskCmd from "../src/commands/rag-ask.js";
-
-const token = process.env.DISCORD_TOKEN;
-const appId = process.env.APP_ID;
-const guildId = process.env.GUILD_ID_DEV;
-
-if (!token || !appId || !guildId) {
-  console.error("[ERR] Missing DISCORD_TOKEN / APP_ID / GUILD_ID_DEV in .env");
-  process.exit(1);
-}
-
-const rest = new REST({ version: "10" }).setToken(token);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
-  // Required options must precede optional ones in every command definition.
-  const body = [
-    dropCmd.data.toJSON(),
-    gameCmd.data.toJSON(),
-    greetCmd.data.toJSON(),
-    scenarioCmd.data.toJSON(),
-    personaCmd.data.toJSON(),
-    ragAddCmd.data.toJSON(),   // ✅ now included
-    ragAskCmd.data.toJSON(),   // ✅ now included
-  ];
+  if (!CONFIG.DISCORD_TOKEN) throw new Error('Missing DISCORD_TOKEN');
+  if (!CONFIG.APP_ID) throw new Error('Missing APP_ID');
+  if (!CONFIG.GUILD_ID_DEV) throw new Error('Missing GUILD_ID_DEV');
+
+  const commandsDir = path.resolve(__dirname, '..', 'src', 'commands');
+  const files = fs.readdirSync(commandsDir).filter((f) => f.endsWith('.js'));
+
+  const body = [];
+  for (const file of files) {
+    const modPath = path.join(commandsDir, file);
+    const mod = await import(modPath);
+    if (mod?.data?.toJSON && typeof mod?.execute === 'function') {
+      const json = mod.data.toJSON();
+      body.push(json);
+      console.log(`- queued: ${json.name} (${file})`);
+    }
+  }
+
+  if (body.length === 0) {
+    console.warn('[WARN] No commands found under /src/commands.');
+    return;
+  }
+
+  const rest = new REST({ version: '10' }).setToken(CONFIG.DISCORD_TOKEN);
+
+  console.log(`[JOB] Deploying ${body.length} commands to guild ${CONFIG.GUILD_ID_DEV}...`);
+  const route = Routes.applicationGuildCommands(CONFIG.APP_ID, CONFIG.GUILD_ID_DEV);
 
   try {
-    await rest.put(
-      Routes.applicationGuildCommands(appId, guildId),
-      { body }
-    );
-    console.log("[CMD] Registered guild commands:", body.length);
+    const res = await rest.put(route, { body });
+    console.log('[JOB] Deployment OK. Count =', Array.isArray(res) ? res.length : 'unknown');
   } catch (e) {
-    console.error("[ERR] Command deploy failed:", e);
-    process.exit(1);
+    console.error('[ERR] deploy-commands failed:', e?.rawError || e);
+    process.exitCode = 1;
   }
 }
 
-main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error('[ERR] Fatal in deploy-commands:', e);
+    process.exit(1);
+  });
+}
