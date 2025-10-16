@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: communiverse-ai-service
+    ports:
+      - "8000:8000" # API port
+      - "9091:9091" # Metrics port
+    volumes:
+      - ./models_cache:/app/models_cache
+      - ./app:/app/app # For development
+    environment:
+      # Service Configuration
+      SERVICE_NAME: communiverse-ai-service
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: info
+
+      # Model Configuration
+      LLM_MODEL: deepseek
+      VLM_MODEL: qwen-vl
+      EMBEDDINGS_MODEL: bge-m3
+      MODEL_CACHE_DIR: /app/models_cache
+
+      # Hardware Configuration
+      DEVICE: cuda
+      USE_8BIT: "true"
+      USE_4BIT: "false"
+
+      # Generation Configuration
+      DEFAULT_MAX_TOKENS: 2048
+      DEFAULT_TEMPERATURE: 0.7
+
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PORT: 9091
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
