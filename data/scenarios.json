@@ -1,0 +1,162 @@
+{
+  "scenarios": [
+    {
+      "prompt": "Glordon mishears ‘couch potato’ again. What should Elio do to calm the room?",
+      "options": [
+        "Explain gently",
+        "Join the joke",
+        "Shush Caleb",
+        "Change topic"
+      ],
+      "correctIndex": 0,
+      "tags": ["elio", "glordon", "caleb", "humor"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Lord Grigon demands entry to the Communiverse. The council hesitates. What earns time to negotiate?",
+      "options": [
+        "A firm no",
+        "Offer a trial mission",
+        "Public vote",
+        "Silent delay"
+      ],
+      "correctIndex": 1,
+      "tags": ["council", "diplomacy"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Caleb storms off after Glordon’s metaphor chaos. Best way to reel him back?",
+      "options": [
+        "Sincere apology",
+        "Double down with memes",
+        "Silent follow",
+        "Call in a favor"
+      ],
+      "correctIndex": 0,
+      "tags": ["caleb", "repair"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Evacuation alert hits the ambassadors. What does Elio secure first?",
+      "options": ["Data core", "Family keepsakes", "Medical kit", "Fuel cells"],
+      "correctIndex": 2,
+      "tags": ["evacuation", "care"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Glordon wants to ‘train like a potato’. What helps without mocking him?",
+      "options": [
+        "Set playful drills",
+        "Say it’s silly",
+        "Ignore him",
+        "Film for clout"
+      ],
+      "correctIndex": 0,
+      "tags": ["glordon", "kindness"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Council debate turns harsh. What Elio line diffuses tension?",
+      "options": [
+        "‘Calm down!’",
+        "Reflect feelings & reframe",
+        "Switch speakers",
+        "End the meeting"
+      ],
+      "correctIndex": 1,
+      "tags": ["mediation"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "A rumor says the Communiverse was AI-made. What response builds trust?",
+      "options": [
+        "Mock the rumor",
+        "Share making-of proof",
+        "Ban discussion",
+        "Do nothing"
+      ],
+      "correctIndex": 1,
+      "tags": ["trust", "community"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Caleb privately admits he’s tired. What should Elio do?",
+      "options": [
+        "Tease him",
+        "Offer break & cover",
+        "Announce it",
+        "Give orders"
+      ],
+      "correctIndex": 1,
+      "tags": ["care", "caleb"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Helix kisses a family trinket before packing. What does that moment suggest?",
+      "options": [
+        "Careless prop",
+        "Hidden lore of Helix",
+        "Accidental shot",
+        "Comic relief"
+      ],
+      "correctIndex": 1,
+      "tags": ["helix", "lore"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Glordon wants to apologize to Caleb. Which approach fits his innocence best?",
+      "options": [
+        "Grand speech",
+        "Simple sincere line",
+        "Buy gifts",
+        "Avoid him"
+      ],
+      "correctIndex": 1,
+      "tags": ["apology", "glordon", "caleb"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Community vote: accept Grigon’s envoy for a monitored trial?",
+      "options": ["Yes, cautious", "No, hard line", "Abstain", "Delay"],
+      "correctIndex": 0,
+      "tags": ["council", "grigon"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "A newcomer feels unsafe in chat. Elio’s best first move?",
+      "options": [
+        "Public call-out",
+        "Private check-in + mod log",
+        "Ignore",
+        "Instant ban the accuser"
+      ],
+      "correctIndex": 1,
+      "tags": ["moderation", "care"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Elio"
+    }
+  ]
+}

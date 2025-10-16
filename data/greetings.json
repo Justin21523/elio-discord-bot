@@ -1,0 +1,37 @@
+{
+  "greetings": [
+    {
+      "text": "Good {weekday}, {guild}! Elio beams a cozy hello ✨",
+      "tags": ["elio", "warm"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Elio",
+      "style": { "title": "Elio says hi", "markdownAccent": "**", "useCodeFontForTags": true, "showTagsField": true },
+      "imageUrl": null
+    },
+    {
+      "text": "Morning, crew! Hydrate and stretch—tiny wins count today, {user}.",
+      "tags": ["elio", "daily"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Elio",
+      "style": { "title": "Starlight Reminder", "markdownAccent": "*", "useCodeFontForTags": false, "showTagsField": true }
+    },
+    {
+      "text": "We proceed with clarity. Thanks for showing up, team.",
+      "tags": ["caleb", "focus"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Caleb",
+      "style": { "title": "Caleb check-in", "markdownAccent": "**" }
+    },
+    {
+      "text": "Hello! Do humans always greet potatoes first? …Asking for a friend.",
+      "tags": ["glordon", "humor"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Glordon",
+      "style": { "title": "Glordon wonders", "markdownAccent": "`", "useCodeFontForTags": true }
+    }
+  ]
+}

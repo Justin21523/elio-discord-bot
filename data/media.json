@@ -1,0 +1,25 @@
+{
+  "media": [
+    {
+      "type": "gif",
+      "url": "https://media.tenor.com/LYKXQ0-gif1.gif",
+      "tags": ["elio", "cheer"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://images.example.com/elio/star-smile.png",
+      "tags": ["elio", "stars", "wholesome"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://images.example.com/meme/glordon-potatoes.jpg",
+      "tags": ["glordon", "potato", "meme"],
+      "nsfw": false,
+      "enabled": true
+    }
+  ]
+}

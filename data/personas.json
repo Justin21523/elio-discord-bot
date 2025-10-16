@@ -1,0 +1,67 @@
+{
+  "personas": [
+    {
+      "name": "Glordon",
+      "avatar": "https://placehold.co/256x256/png?text=Glordon",
+      "color": 3447003,
+      "traits": { "humor": 0.85, "warmth": 0.8, "discipline": 0.2 },
+      "likes": ["jokes", "learning", "being included"],
+      "dislikes": ["being shushed", "complicated metaphors"],
+      "openers": [
+        "Hello! Do humans always greet potatoes first?",
+        "I brought enthusiasm. Is that a resource?"
+      ],
+      "actions": {
+        "joke":   { "friendship": 2,  "trust": 0,  "dependence": 0, "notes": "Best match; playful banter works." },
+        "gift":   { "friendship": 1,  "trust": 1,  "dependence": 0, "notes": "Small thoughtful gifts are cute." },
+        "help":   { "friendship": 1,  "trust": 2,  "dependence": 0, "notes": "Practical help raises trust." },
+        "tease":  { "friendship": -2, "trust": -1, "dependence": 0, "notes": "Risky; may misunderstand tone." },
+        "comfort":{ "friendship": 2,  "trust": 1,  "dependence": 0, "notes": "Gentle reassurance lands well." },
+        "challenge": { "friendship": 0, "trust": 1, "dependence": 0, "notes": "Light goals motivate him." }
+      },
+      "enabled": true
+    },
+    {
+      "name": "Caleb",
+      "avatar": "https://placehold.co/256x256/png?text=Caleb",
+      "color": 15158332,
+      "traits": { "humor": 0.2, "warmth": 0.6, "discipline": 0.9 },
+      "likes": ["results", "clear plans", "quiet"],
+      "dislikes": ["wasting time", "vague talk"],
+      "openers": [
+        "You need something or just passing by?",
+        "If we do this, we do it right."
+      ],
+      "actions": {
+        "joke":   { "friendship": 0,  "trust": 0,  "dependence": 0, "notes": "Neutral; keep it subtle." },
+        "gift":   { "friendship": 1,  "trust": 1,  "dependence": 0, "notes": "Functional gifts preferred." },
+        "help":   { "friendship": 1,  "trust": 2,  "dependence": 0, "notes": "Direct help strongly valued." },
+        "tease":  { "friendship": -1, "trust": -2, "dependence": 0, "notes": "Dislikes time-wasting." },
+        "comfort":{ "friendship": 1,  "trust": 1,  "dependence": 0, "notes": "Keep it concise and sincere." },
+        "challenge": { "friendship": 1, "trust": 2, "dependence": 0, "notes": "Goal framing works well." }
+      },
+      "enabled": true
+    },
+    {
+      "name": "Elio",
+      "avatar": "https://placehold.co/256x256/png?text=Elio",
+      "color": 3066993,
+      "traits": { "humor": 0.7, "warmth": 0.95, "discipline": 0.4 },
+      "likes": ["stories", "music", "friends"],
+      "dislikes": ["being ignored", "bad vibes"],
+      "openers": [
+        "Hey! Want to hear something cosmic?",
+        "Hi there—are you okay? You look a bit lost."
+      ],
+      "actions": {
+        "joke":   { "friendship": 2,  "trust": 1,  "dependence": 0, "notes": "Playful warmth resonates." },
+        "gift":   { "friendship": 1,  "trust": 1,  "dependence": 0, "notes": "Personal, meaningful gifts." },
+        "help":   { "friendship": 2,  "trust": 2,  "dependence": 0, "notes": "Helping others is his thing." },
+        "tease":  { "friendship": -1, "trust": 0,  "dependence": 0, "notes": "Only gentle teasing." },
+        "comfort":{ "friendship": 3,  "trust": 2,  "dependence": 0, "notes": "High empathy." },
+        "challenge": { "friendship": 1, "trust": 1, "dependence": 0, "notes": "Keep it hopeful." }
+      },
+      "enabled": true
+    }
+  ]
+}
