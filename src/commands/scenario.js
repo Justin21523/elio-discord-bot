@@ -1,148 +1,287 @@
-// src/commands/scenario.js
-// Slash command skeleton for scenario multiple-choice game.
-// Phase B: start a session, show A/B/C/D buttons, record one answer per user.
-// Phase C: add reveal timing, correctness scoring, and leaderboard integration.
+/**
+ * commands/persona.js
+ * Persona command handlers: /persona meet, /persona act, /persona config
+ */
 
+import { logger } from "../util/logger.js";
+import { ErrorCode } from "../config.js";
+import { successEmbed, errorEmbed, infoEmbed } from "../util/replies.js";
 import {
-  SlashCommandBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-} from "discord.js";
-import { startSession } from "../services/scenario.js";
-import { ObjectId } from "mongodb";
-import { collections } from "../db/mongo.js";
-import { safeDefer, edit } from "../util/replies.js";
+  getPersona,
+  listPersonas,
+  getConfig,
+  setConfig,
+  affinityDelta,
+} from "../services/personasService.js";
+import { personaSay } from "../services/webhooksService.js";
 
-export const data = new SlashCommandBuilder()
-  .setName("scenario")
-  .setDescription("Scenario multiple-choice game")
-  .addSubcommand((sc) =>
-    sc
-      .setName("start")
-      .setDescription("Start a random scenario")
-      .addStringOption((o) => o.setName("tag").setDescription("Filter by tag"))
-      .addIntegerOption((o) =>
-        o
-          .setName("reveal_in")
-          .setDescription("Reveal in minutes (0 = instant, Phase C)")
-          .setMinValue(0)
-          .setMaxValue(120)
-      )
-  )
-  .addSubcommand((sc) =>
-    sc
-      .setName("stats")
-      .setDescription("Show stats for the latest scenario in this channel")
-  );
+/**
+ * Main persona command router
+ * @param {ChatInputCommandInteraction} interaction
+ * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
+ */
+export default async function handlePersona(interaction) {
+  const subcommand = interaction.options.getSubcommand();
 
-export async function execute(interaction, client) {
-  try {
-    await safeDefer(interaction, true);
-    const sub = interaction.options.getSubcommand();
-
-    if (sub === "start") {
-      const tag = interaction.options.getString("tag") || null;
-      const revealIn = interaction.options.getInteger("reveal_in") ?? 0;
-
-      const { sessionId } = await startSession(client, {
-        guildId: interaction.guildId,
-        channelId: interaction.channelId,
-        tag,
-        revealIn,
-      });
-
-      return edit(
-        interaction,
-        `Scenario posted! (session: \`${sessionId}\`, reveal in ${revealIn}m)`
-      );
-    }
-
-    // stats unchanged from Phase B
-    if (sub === "stats") {
-      const { scenario_sessions, scenario_answers } = collections();
-      const latest = await scenario_sessions
-        .find({ channelId: interaction.channelId })
-        .sort({ startedAt: -1 })
-        .limit(1)
-        .toArray();
-      const session = latest[0];
-      if (!session)
-        return edit(interaction, "No scenario session found in this channel.");
-
-      const agg = await scenario_answers
-        .aggregate([
-          { $match: { sessionId: session._id.toString() } },
-          { $group: { _id: "$choice", count: { $sum: 1 } } },
-        ])
-        .toArray();
-
-      const counts = [0, 0, 0, 0];
-      for (const r of agg) counts[r._id] = r.count;
-
-      const text = `Stats for latest session:\nA: ${counts[0]} | B: ${counts[1]} | C: ${counts[2]} | D: ${counts[3]}\n(Status: ${session.status})`;
-      return edit(interaction, text);
-    }
-
-    return edit(interaction, "Unknown subcommand.");
-  } catch (err) {
-    console.error("[ERR] /scenario failed:", err);
-    return edit(interaction, "Something went wrong while handling /scenario.");
+  switch (subcommand) {
+    case "meet":
+      return await handlePersonaMeet(interaction);
+    case "list":
+      return await handlePersonaList(interaction);
+    case "config":
+      return await handlePersonaConfig(interaction);
+    default:
+      return {
+        ok: false,
+        error: {
+          code: ErrorCode.BAD_REQUEST,
+          message: "Unknown subcommand",
+        },
+      };
   }
 }
 
-// Button handler (Phase B: record single answer; Phase C: reveal + scoring)
-export async function handleButton(interaction) {
-  const id = interaction.customId || "";
-  if (!id.startsWith("scn_")) return false;
-
+/**
+ * Handle /persona meet <name> [#channel]
+ */
+async function handlePersonaMeet(interaction) {
   try {
-    const parts = id.split("_"); // scn_<sessionId>_<choice>
-    const sessionId = parts[1];
-    const choice = Number(parts[2]) || 0;
+    const personaName = interaction.options.getString("name", true);
+    const targetChannel =
+      interaction.options.getChannel("channel") || interaction.channel;
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
 
-    const { scenario_sessions, scenario_answers } = collections();
-    const session = await scenario_sessions.findOne({
-      _id: new ObjectId(sessionId),
+    // Get persona
+    const personaResult = await getPersona(personaName);
+    if (!personaResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Persona Not Found",
+            `Persona "${personaName}" doesn't exist. Use \`/persona list\` to see available personas.`
+          ),
+        ],
+      });
+      return personaResult;
+    }
+
+    const persona = personaResult.data;
+
+    // Pick greeting
+    const greeting =
+      persona.openers && persona.openers.length > 0
+        ? persona.openers[Math.floor(Math.random() * persona.openers.length)]
+        : `Hello! I'm ${persona.name}.`;
+
+    // Send as persona via webhook
+    const sayResult = await personaSay({
+      client: interaction.client,
+      channelId: targetChannel.id,
+      persona,
+      content: greeting,
     });
-    if (!session || session.status !== "open") {
-      await interaction.reply({
-        content: "This scenario is closed or invalid.",
-        ephemeral: true,
+
+    if (!sayResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Failed to Send",
+            "Could not send persona message. Check bot permissions for webhooks."
+          ),
+        ],
       });
-      return true;
+      return sayResult;
     }
 
-    // Insert answer; uniqueness on (sessionId, userId)
-    try {
-      await scenario_answers.insertOne({
-        sessionId,
-        userId: interaction.user.id,
-        choice,
-        answeredAt: new Date(),
+    // Update affinity
+    await affinityDelta({
+      guildId,
+      userId,
+      personaId: persona._id.toString(),
+      delta: { friendship: 2, trust: 1 },
+      action: "meet",
+    });
+
+    await interaction.editReply({
+      embeds: [
+        successEmbed(
+          "Persona Appeared!",
+          `${persona.name} has appeared in ${targetChannel}!`
+        ),
+      ],
+    });
+
+    logger.command("/persona meet success", {
+      guildId,
+      personaName: persona.name,
+      channelId: targetChannel.id,
+      userId,
+    });
+
+    return { ok: true, data: { personaId: persona._id.toString() } };
+  } catch (error) {
+    logger.error("[CMD] /persona meet failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to make persona appear",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Handle /persona list
+ */
+async function handlePersonaList(interaction) {
+  try {
+    const listResult = await listPersonas();
+    if (!listResult.ok) {
+      await interaction.editReply({
+        content: "❌ Failed to list personas. Please try again.",
       });
-      await interaction.reply({
-        content: `Answer received: ${
-          ["A", "B", "C", "D"][choice] || "?"
-        }. (Phase C will reveal the result.)`,
-        ephemeral: true,
-      });
-    } catch (e) {
-      // Likely duplicate key (already answered)
-      await interaction.reply({
-        content: "You already answered this scenario.",
-        ephemeral: true,
-      });
+      return listResult;
     }
-    return true;
-  } catch (err) {
-    console.error("[ERR] scenario button failed:", err);
-    try {
-      await interaction.reply({
-        content: "Something went wrong.",
-        ephemeral: true,
+
+    const personas = listResult.data;
+
+    if (personas.length === 0) {
+      await interaction.editReply({
+        content: "📋 No personas available yet.",
       });
-    } catch {}
-    return true;
+      return { ok: true, data: { empty: true } };
+    }
+
+    let description = "";
+    for (const p of personas) {
+      const traits = p.traits
+        ? `(Humor: ${p.traits.humor || 0}, Warmth: ${p.traits.warmth || 0})`
+        : "";
+      description += `**${p.name}** ${traits}\n`;
+    }
+
+    await interaction.editReply({
+      embeds: [infoEmbed("Available Personas", description)],
+    });
+
+    logger.command("/persona list success", {
+      guildId: interaction.guildId,
+      count: personas.length,
+    });
+
+    return { ok: true, data: { personas } };
+  } catch (error) {
+    logger.error("[CMD] /persona list failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to list personas",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Handle /persona config get|set
+ */
+async function handlePersonaConfig(interaction) {
+  try {
+    const action = interaction.options.getString("action", true);
+    const guildId = interaction.guildId;
+
+    if (action === "get") {
+      const configResult = await getConfig(guildId);
+      if (!configResult.ok) {
+        await interaction.editReply({
+          content: "❌ Failed to get config. Please try again.",
+        });
+        return configResult;
+      }
+
+      const config = configResult.data;
+
+      const description =
+        `**Cooldown**: ${config.cooldownSec} seconds\n` +
+        `**Keyword Triggers**: ${
+          config.keywordTriggersEnabled ? "Enabled" : "Disabled"
+        }\n` +
+        `**Memory Opt-In**: ${config.memoryOptIn ? "Enabled" : "Disabled"}\n` +
+        `**Action Multipliers**:\n` +
+        Object.entries(config.multipliers || {})
+          .map(([action, mult]) => `  • ${action}: ${mult}x`)
+          .join("\n");
+
+      await interaction.editReply({
+        embeds: [infoEmbed("Persona Configuration", description)],
+      });
+
+      return { ok: true, data: config };
+    } else if (action === "set") {
+      const key = interaction.options.getString("key", true);
+      const value = interaction.options.getString("value", true);
+
+      // Parse value
+      let parsedValue;
+      if (value === "true" || value === "false") {
+        parsedValue = value === "true";
+      } else if (!isNaN(value)) {
+        parsedValue = parseFloat(value);
+      } else {
+        parsedValue = value;
+      }
+
+      const updates = { [key]: parsedValue };
+      const setResult = await setConfig(guildId, updates);
+
+      if (!setResult.ok) {
+        await interaction.editReply({
+          embeds: [errorEmbed("Config Update Failed", setResult.error.message)],
+        });
+        return setResult;
+      }
+
+      await interaction.editReply({
+        embeds: [
+          successEmbed(
+            "Config Updated",
+            `Set **${key}** to **${parsedValue}**`
+          ),
+        ],
+      });
+
+      return { ok: true, data: setResult.data };
+    } else {
+      return {
+        ok: false,
+        error: {
+          code: ErrorCode.BAD_REQUEST,
+          message: "Unknown config action",
+        },
+      };
+    }
+  } catch (error) {
+    logger.error("[CMD] /persona config failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to manage config",
+        cause: error,
+      },
+    };
   }
 }

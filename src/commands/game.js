@@ -1,66 +1,214 @@
-import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { collections } from '../db/mongo.js';
-import { awardWin, getLeaderboard } from '../services/points.js';
-import { safeDefer, edit } from '../util/replies.js';
+/**
+ * commands/game.js
+ * Game command handlers: /game start and button click interactions.
+ * Thin handlers - business logic in services.
+ */
 
-export const data = new SlashCommandBuilder()
-  .setName('game')
-  .setDescription('Quick-react mini-game')
-  .addSubcommand(sc => sc.setName('start').setDescription('Start a quick-react game'))
-  .addSubcommand(sc => sc.setName('leaderboard').setDescription('Show top users'));
+import { ButtonBuilder, ButtonStyle, ActionRowBuilder } from "discord.js";
+import { logger } from "../util/logger.js";
+import { ErrorCode } from "../config.js";
+import { successEmbed, errorEmbed, infoEmbed } from "../util/replies.js";
+import { startGame, handleClick } from "../services/gameService.js";
 
-export async function execute(interaction, client) {
-  try {
-    await safeDefer(interaction, true);
-    const sub = interaction.options.getSubcommand();
+/**
+ * Main game command router
+ * @param {ChatInputCommandInteraction} interaction
+ * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
+ */
+export default async function handleGame(interaction) {
+  const subcommand = interaction.options.getSubcommand();
 
-    if (sub === 'start') {
-      const { games } = collections();
-      const doc = {
-        guildId: interaction.guildId,
-        channelId: interaction.channelId,
-        type: 'first-click',
-        status: 'open',
-        startedAt: new Date()
+  switch (subcommand) {
+    case "start":
+      return await handleGameStart(interaction);
+    default:
+      return {
+        ok: false,
+        error: {
+          code: ErrorCode.BAD_REQUEST,
+          message: "Unknown subcommand",
+        },
       };
-      const res = await games.insertOne(doc);
-      const gameId = res.insertedId.toString();
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`first_${gameId}`).setLabel("I'm first!").setStyle(ButtonStyle.Success)
-      );
-
-      const msg = await interaction.followUp({ content: 'First to click WINS!', components: [row], ephemeral: false });
-      await games.updateOne({ _id: res.insertedId }, { $set: { messageId: msg.id } });
-      return edit(interaction, 'Game posted!');
-    }
-
-    if (sub === 'leaderboard') {
-      const top = await getLeaderboard(interaction.guildId, 10);
-      if (!top.length) return edit(interaction, 'No scores yet.');
-      const lines = top.map((p, i) => `${i + 1}. <@${p.userId}> — ${p.points} pts (Lv.${p.level || 1})`);
-      return edit(interaction, 'Top players:\n' + lines.join('\n'));
-    }
-
-    return edit(interaction, 'Unknown subcommand.');
-  } catch (e) {
-    console.error('[ERR] /game failed:', e);
-    return edit(interaction, 'Something went wrong while handling /game.');
   }
 }
 
-// Interaction button router (wired in index.js)
-export async function handleButton(interaction) {
-  if (!interaction.customId?.startsWith('first_')) return false;
-  const gameId = interaction.customId.split('_')[1];
-  const { games } = collections();
-  const game = await games.findOne({ _id: new (await import('mongodb')).ObjectId(gameId) });
-  if (!game || game.status !== 'open') {
-    return interaction.reply({ content: 'Too late!', ephemeral: true });
-  }
-  await games.updateOne({ _id: game._id }, { $set: { status: 'closed', winnerUserId: interaction.user.id } });
+/**
+ * Handle /game start
+ */
+async function handleGameStart(interaction) {
+  try {
+    const guildId = interaction.guildId;
+    const channelId = interaction.channelId;
 
-  const profile = await awardWin({ guildId: interaction.guildId, userId: interaction.user.id });
-  await interaction.reply({ content: `��� <@${interaction.user.id}> wins! (+${profile ? 'points' : ''})`, ephemeral: false });
-  return true;
+    // Create game button
+    const button = new ButtonBuilder()
+      .setCustomId("game_click_pending") // Will be updated after message is sent
+      .setLabel("🎯 Click to Win!")
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    // Send game message
+    const message = await interaction.editReply({
+      embeds: [
+        infoEmbed(
+          "Quick React Game",
+          "**First click wins!**\n" +
+            "Be the first to press the button to earn points.\n\n" +
+            "🏆 Winner gets **10 points**\n" +
+            "⚡ Cooldown: 30 seconds between wins"
+        ),
+      ],
+      components: [row],
+    });
+
+    // Start game in database
+    const gameResult = await startGame({
+      guildId,
+      channelId,
+      messageId: message.id,
+    });
+
+    if (!gameResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Game Start Failed",
+            "Could not start the game. Please try again."
+          ),
+        ],
+        components: [],
+      });
+      return gameResult;
+    }
+
+    const gameId = gameResult.data.gameId;
+
+    // Update button with actual game ID
+    button.setCustomId(`game_click_${gameId}`);
+    const updatedRow = new ActionRowBuilder().addComponents(button);
+
+    await interaction.editReply({
+      embeds: message.embeds,
+      components: [updatedRow],
+    });
+
+    logger.command("/game start success", {
+      guildId,
+      channelId,
+      gameId,
+      messageId: message.id,
+    });
+
+    return { ok: true, data: { gameId, messageId: message.id } };
+  } catch (error) {
+    logger.error("[CMD] /game start failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to start game",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Handle game button click
+ * @param {ButtonInteraction} interaction
+ * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
+ */
+export async function handleGameClick(interaction) {
+  try {
+    const customId = interaction.customId;
+    const gameId = customId.replace("game_click_", "");
+    const userId = interaction.user.id;
+    const guildId = interaction.guildId;
+
+    if (gameId === "pending") {
+      await interaction.reply({
+        content: "⚠️ Game is still loading, please wait a moment.",
+        ephemeral: true,
+      });
+      return { ok: false };
+    }
+
+    // Process click
+    const clickResult = await handleClick({
+      gameId,
+      userId,
+      guildId,
+    });
+
+    if (!clickResult.ok) {
+      // User was late or on cooldown
+      await interaction.reply({
+        content: clickResult.error.message,
+        ephemeral: true,
+      });
+      return clickResult;
+    }
+
+    // User won!
+    const pointsData = clickResult.data.points;
+
+    let winMessage = `🎉 **${interaction.user.username}** wins!\n\n`;
+    winMessage += `✨ **+${pointsData.awarded} points**\n`;
+    winMessage += `📊 Total: **${pointsData.points} points** (Level ${pointsData.level})`;
+
+    if (pointsData.leveledUp) {
+      winMessage += `\n\n🎊 **LEVEL UP!** You reached Level ${pointsData.level}!`;
+    }
+
+    // Disable button
+    const disabledButton = ButtonBuilder.from(interaction.component)
+      .setDisabled(true)
+      .setLabel("Game Over")
+      .setStyle(ButtonStyle.Secondary);
+
+    const disabledRow = new ActionRowBuilder().addComponents(disabledButton);
+
+    // Update original message
+    await interaction.update({
+      embeds: [successEmbed("Winner!", winMessage)],
+      components: [disabledRow],
+    });
+
+    logger.interaction("Game click - Winner", {
+      gameId,
+      userId,
+      guildId,
+      points: pointsData.awarded,
+    });
+
+    return { ok: true, data: clickResult.data };
+  } catch (error) {
+    logger.error("[INT] Game click failed", {
+      customId: interaction.customId,
+      userId: interaction.user.id,
+      error: error.message,
+    });
+
+    try {
+      await interaction.reply({
+        content: "❌ Something went wrong. Please try again.",
+        ephemeral: true,
+      });
+    } catch (replyError) {
+      // Ignore reply errors
+    }
+
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to process click",
+        cause: error,
+      },
+    };
+  }
 }

@@ -38,6 +38,10 @@ data/db/
 dump/
 backup/
 
+# local data
+data/
+.llm_provider/
+
 # Misc
 *.swp
 *.swo
