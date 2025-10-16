@@ -1,118 +1,212 @@
-// src/db/mongo.js
+/**
+ * db/mongo.js
+ * MongoDB connection and index bootstrapping.
+ * Follows DATABASE_SCHEMA.md exactly.
+ */
+
 import { MongoClient } from "mongodb";
-import { CONFIG } from "../config.js";
+import { config } from "../config.js";
+import { logger } from "../util/logger.js";
 
-export const state = {
-  client: null,
-  db: null,
-};
+let client = null;
+let db = null;
 
-export async function connectMongo() {
-  if (state.client) return state.client;
-  const uri =
-    CONFIG.MONGODB_URI ||
-    "mongodb://dev:devpass@127.0.0.1:27017/?authSource=admin";
-  const client = new MongoClient(uri);
-  await client.connect();
-  const db = client.db(CONFIG.DB_NAME || "communiverse_bot");
-  state.client = client;
-  state.db = db;
+/**
+ * Connect to MongoDB and return database instance
+ * @returns {Promise<Db>}
+ */
+export async function connectDB() {
+  if (db) return db;
 
-  // --- Core indexes for existing features ---
-  await Promise.all([
-    db.collection("media").createIndex({ enabled: 1, nsfw: 1 }),
-    // MIGRATION: ensure schedules unique on (guildId, kind). Drop legacy unique on guildId if exists.
-    (async () => {
-      const idx = await db.collection("schedules").indexes();
-      const legacy = idx.find((i) => i.name === "guildId_1" && i.unique);
-      if (legacy) {
-        try {
-          await db.collection("schedules").dropIndex("guildId_1");
-        } catch {}
+  try {
+    client = new MongoClient(config.db.uri);
+    await client.connect();
+    db = client.db(config.db.name);
+
+    logger.info("[DB] Connected to MongoDB", {
+      host: config.db.uri,
+      database: config.db.name,
+    });
+
+    // Bootstrap indexes
+    await ensureIndexes();
+
+    return db;
+  } catch (error) {
+    logger.error("[DB] Failed to connect", { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Ensure all required indexes exist
+ * Swallows NamespaceNotFound and IndexNotFound errors per spec
+ */
+async function ensureIndexes() {
+  if (!db) throw new Error("Database not connected");
+
+  const indexSpecs = [
+    // media
+    { collection: "media", spec: { enabled: 1, nsfw: 1 } },
+    { collection: "media", spec: { tags: 1 } },
+    { collection: "media", spec: { addedAt: -1 } },
+
+    // schedules
+    {
+      collection: "schedules",
+      spec: { guildId: 1, kind: 1 },
+      options: { unique: true },
+    },
+    { collection: "schedules", spec: { enabled: 1 } },
+    { collection: "schedules", spec: { channelId: 1 } },
+
+    // profiles
+    {
+      collection: "profiles",
+      spec: { guildId: 1, userId: 1 },
+      options: { unique: true },
+    },
+    { collection: "profiles", spec: { guildId: 1, points: -1 } },
+
+    // games
+    { collection: "games", spec: { guildId: 1, status: 1 } },
+    { collection: "games", spec: { channelId: 1, status: 1, startedAt: -1 } },
+
+    // greetings
+    { collection: "greetings", spec: { weight: -1 } },
+
+    // personas
+    { collection: "personas", spec: { name: 1 }, options: { unique: true } },
+
+    // persona_config
+    {
+      collection: "persona_config",
+      spec: { guildId: 1 },
+      options: { unique: true },
+    },
+
+    // persona_affinity
+    {
+      collection: "persona_affinity",
+      spec: { guildId: 1, userId: 1, personaId: 1 },
+      options: { unique: true },
+    },
+    {
+      collection: "persona_affinity",
+      spec: { guildId: 1, personaId: 1, friendship: -1 },
+    },
+
+    // scenarios
+    { collection: "scenarios", spec: { enabled: 1, tags: 1 } },
+    { collection: "scenarios", spec: { host: 1 } },
+
+    // scenario_sessions
+    {
+      collection: "scenario_sessions",
+      spec: { sessionId: 1 },
+      options: { unique: true },
+    },
+    { collection: "scenario_sessions", spec: { guildId: 1, createdAt: -1 } },
+
+    // scenario_answers
+    {
+      collection: "scenario_answers",
+      spec: { sessionId: 1, userId: 1 },
+      options: { unique: true },
+    },
+    { collection: "scenario_answers", spec: { sessionId: 1, correct: 1 } },
+
+    // admin_audit
+    { collection: "admin_audit", spec: { guildId: 1, createdAt: -1 } },
+
+    // ai_logs (with TTL)
+    { collection: "ai_logs", spec: { kind: 1, createdAt: -1 } },
+    { collection: "ai_logs", spec: { status: 1, createdAt: -1 } },
+    {
+      collection: "ai_logs",
+      spec: { createdAt: 1 },
+      options: { expireAfterSeconds: 60 * 60 * 24 * 30 },
+    },
+
+    // conversation_memory (with TTL)
+    {
+      collection: "conversation_memory",
+      spec: { guildId: 1, userId: 1, createdAt: -1 },
+    },
+    {
+      collection: "conversation_memory",
+      spec: { ttlAt: 1 },
+      options: { expireAfterSeconds: 0 },
+    },
+
+    // news_items
+    { collection: "news_items", spec: { publishedAt: -1 } },
+    { collection: "news_items", spec: { source: 1, fetchedAt: -1 } },
+    { collection: "news_items", spec: { url: 1 }, options: { unique: true } },
+  ];
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const { collection, spec, options } of indexSpecs) {
+    try {
+      await db.collection(collection).createIndex(spec, options || {});
+      created++;
+    } catch (error) {
+      // Swallow expected errors per spec
+      if (
+        error.code === 26 || // NamespaceNotFound
+        error.code === 27 || // IndexNotFound
+        error.codeName === "NamespaceNotFound" ||
+        error.codeName === "IndexNotFound"
+      ) {
+        skipped++;
+      } else if (
+        error.code === 85 ||
+        error.codeName === "IndexOptionsConflict"
+      ) {
+        // Index already exists with different options - log warning but continue
+        logger.warn("[DB] Index already exists with different options", {
+          collection,
+          spec: JSON.stringify(spec),
+        });
+        skipped++;
+      } else {
+        // Unexpected error - log but don't throw
+        logger.warn("[DB] Index creation warning", {
+          collection,
+          spec: JSON.stringify(spec),
+          error: error.message,
+        });
+        skipped++;
       }
-      await db
-        .collection("schedules")
-        .createIndex({ guildId: 1, kind: 1 }, { unique: true });
-    })(),
-    db.collection("profiles").createIndex({ guildId: 1, points: -1 }),
-    db.collection("games").createIndex({ guildId: 1, status: 1 }),
-  ]);
+    }
+  }
 
-  // --- New collections & indexes for Phase A ---
-  const greetings = db.collection("greetings");
-  const scenarios = db.collection("scenarios");
-  const scenarioSessions = db.collection("scenario_sessions");
-  const scenarioAnswers = db.collection("scenario_answers");
-  const personas = db.collection("personas");
-  const personaAffinity = db.collection("persona_affinity");
-  const personaConfig = db.collection("persona_config"); // single-doc config: actions/modifiers/cooldown
+  logger.info("[JOB] indexes ensured", {
+    created,
+    skipped,
+    total: indexSpecs.length,
+  });
+}
 
-  await Promise.all([
-    // greetings: query by enabled/tags when picking a message
-    greetings.createIndex({ enabled: 1, tags: 1 }),
-
-    // scenarios: query by enabled/tags/weight
-    scenarios.createIndex({ enabled: 1, tags: 1 }),
-
-    // sessions: find open ones per guild, or by status
-    scenarioSessions.createIndex({ guildId: 1, status: 1 }),
-    // scenario_answers: prevent multiple answers per user per session
-    scenarioAnswers.createIndex({ sessionId: 1, userId: 1 }, { unique: true }),
-
-    // personas: unique names; quick lookup by name
-    personas.createIndex({ name: 1 }, { unique: true }),
-
-    // persona_affinity: one record per (guild, user, persona)
-    personaAffinity.createIndex(
-      { guildId: 1, userId: 1, personaId: 1 },
-      { unique: true }
-    ),
-    // Optional TTL ideas (not enabled now):
-    // scenarioSessions.createIndex({ revealAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 }); // 30 days
-  ]);
-
-  console.log(
-    "[INT] Mongo connected ->",
-    CONFIG.DB_NAME,
-    "URI=",
-    CONFIG.MONGODB_URI
-  );
+/**
+ * Get database instance (must call connectDB first)
+ * @returns {Db}
+ */
+export function getDB() {
+  if (!db) throw new Error("Database not initialized. Call connectDB() first.");
   return db;
 }
 
-/** Helper for scripts to get the active DB after connectMongo() */
-export function getDb() {
-  if (!state.db)
-    throw new Error("Mongo not connected. Call connectMongo() first.");
-  return state.db;
-}
-
-/** for tests/tools */
-export function collections() {
-  const db = getDb();
-  return {
-    media: db.collection("media"),
-    schedules: db.collection("schedules"),
-    profiles: db.collection("profiles"),
-    games: db.collection("games"),
-    greetings: db.collection("greetings"),
-    scenarios: db.collection("scenarios"),
-    scenario_sessions: db.collection("scenario_sessions"),
-    scenario_answers: db.collection("scenario_answers"),
-    personas: db.collection("personas"),
-    persona_config: db.collection("persona_config"),
-    persona_affinity: db.collection("persona_affinity"),
-  };
-}
-
-export async function closeMongo() {
-  try {
-    if (client) await client.close(true);
-    console.log("[INT] Mongo closed");
-  } catch (e) {
-    console.error("[ERR] Mongo close failed:", e);
-  } finally {
-    client = undefined;
-    db = undefined;
+/**
+ * Close database connection gracefully
+ */
+export async function closeDB() {
+  if (client) {
+    await client.close();
+    client = null;
+    db = null;
+    logger.info("[DB] Connection closed");
   }
 }
