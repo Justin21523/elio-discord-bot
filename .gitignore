@@ -9,6 +9,15 @@ package-lock.json
 .env
 .env.*.local
 
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Hugging Face cache
+hf-cache/
+hf_cache/
+ai-python/hf-cache/
+
 # Logs
 logs
 *.log
@@ -46,3 +55,5 @@ data/
 *.swp
 *.swo
 Thumbs.db
+
+
