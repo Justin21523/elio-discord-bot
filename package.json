@@ -1,23 +1,35 @@
 {
   "name": "communiverse-bot",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
+  "description": "Feature-complete AI-augmented Discord bot for Elio/Pixar communities",
+  "main": "src/index.js",
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
-    "dev": "node src/index.js",
-    "deploy:dev": "node scripts/deploy-commands.js",
-    "seed:media": "node scripts/seed-media.js",
-    "seed:greetings": "node scripts/seed-greetings.js",
-    "seed:scenarios": "node scripts/seed-scenarios.js",
-    "seed:personas": "node scripts/seed-personas.js"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy-commands": "node scripts/deploy-commands.js",
+    "seed": "node scripts/seed-data.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.15.3",
-    "dotenv": "^16.4.5",
-    "mongodb": "^6.9.0",
-    "node-cron": "^3.0.3"
-  }
+    "discord.js": "^14.14.1",
+    "mongodb": "^6.3.0",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.3.1",
+    "prom-client": "^15.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "elio",
+    "communiverse",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT"
 }
