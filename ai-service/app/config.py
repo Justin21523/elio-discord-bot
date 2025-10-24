@@ -3,10 +3,9 @@ AI Service Configuration - Complete
 """
 
 import os
-from typing import Literal, Optional
-from pydantic_settings import BaseSettings
+from typing import List, Literal, Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from typing import List
 
 
 class Settings(BaseSettings):
@@ -24,7 +23,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = Field(default="deepspek", env="LLM_MODEL")  # type: ignore
     VLM_MODEL: str = Field(default="qwen-v1", env="VLM_MODEL")  # type: ignore
     EMBED_MODEL: str = Field(default="BAAI/bge-m3", env="EMBED_MODEL")  # type: ignore
-    MODEL_CACHE_DIR: str = Field(default="./models_cache", env="MODEL_CACHE_DIR")  # type: ignore
+    MODEL_CACHE_DIR: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/models", env="MODEL_CACHE_DIR")  # type: ignore
     DEVICE: str = Field(default="cuda", env="DEVICE")  # type: ignore
     HF_TOKEN: str = Field(default="", env="HF_TOKEN")  # type: ignore
 
@@ -41,10 +40,10 @@ class Settings(BaseSettings):
     USE_4BIT: bool = Field(default=False, env="USE_4BIT")  # type: ignore
     MAX_MEMORY_GB: Optional[int] = Field(default=None, env="MAX_MEMORY_GB")  # type: ignore
 
-    # ===== Generation Defaults =====
+    # ===== Generation Defaults (OPTIMIZED) =====
     DEFAULT_MAX_TOKENS: int = Field(default=2048, env="DEFAULT_MAX_TOKENS")  # type: ignore
-    DEFAULT_TEMPERATURE: float = Field(default=0.7, env="DEFAULT_TEMPERATURE")  # type: ignore
-    DEFAULT_TOP_P: float = Field(default=0.9, env="DEFAULT_TOP_P")  # type: ignore
+    DEFAULT_TEMPERATURE: float = Field(default=0.75, env="DEFAULT_TEMPERATURE")  # type: ignore
+    DEFAULT_TOP_P: float = Field(default=0.92, env="DEFAULT_TOP_P")  # type: ignore
 
     # ===== Performance =====
     MAX_BATCH_SIZE: int = Field(default=8, env="MAX_BATCH_SIZE")  # type: ignore
@@ -69,28 +68,28 @@ class Settings(BaseSettings):
     AGENT_PARALLEL_TOOLS: bool = Field(default=True, env="AGENT_PARALLEL_TOOLS")  # type: ignore
 
     # ===== RAG / Vector / BM25 / Hybrid =====
-    VECTOR_DB_PATH: str = Field(default="./data/vector_db", env="VECTOR_DB_PATH")  # type: ignore
+    VECTOR_DB_PATH: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/vector_db", env="VECTOR_DB_PATH")  # type: ignore
     VECTOR_DIM: int = Field(default=1024, env="VECTOR_DIM")  # type: ignore
     VECTOR_METRIC: Literal["cosine", "euclidean", "dot"] = Field(
         default="cosine", env="VECTOR_METRIC"  # type: ignore
     )
 
-    BM25_INDEX_PATH: str = Field(default="./data/bm25_index", env="BM25_INDEX_PATH")  # type: ignore
+    BM25_INDEX_PATH: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/bm25_index", env="BM25_INDEX_PATH")  # type: ignore
     BM25_K1: float = Field(default=1.2, env="BM25_K1")  # type: ignore
     BM25_B: float = Field(default=0.75, env="BM25_B")  # type: ignore
 
     HYBRID_ALPHA: float = Field(default=0.5, env="HYBRID_ALPHA")  # type: ignore
 
-    # Search parameters
+    # Search parameters (OPTIMIZED)
     RAG_TOP_K: int = Field(default=10, env="RAG_TOP_K")  # type: ignore
-    RAG_MMR_SCORE: float = Field(default=0.7, env="RAG_MMR_SCORE")  # type: ignore
+    RAG_MMR_SCORE: float = Field(default=0.5, env="RAG_MMR_SCORE")  # type: ignore
     RAG_RERANK: bool = Field(default=False, env="RAG_RERANK")  # type: ignore
     RAG_RERANK_MODEL: str = Field(
         default="BAAI/bge-reranker-base", env="RAG_RERANK_MODEL"  # type: ignore
     )
 
     # ===== Story（如使用到） =====
-    STORY_DB_PATH: str = Field(default="./data/stories", env="STORY_DB_PATH")  # type: ignore
+    STORY_DB_PATH: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/stories", env="STORY_DB_PATH")  # type: ignore
     STORY_SEARCH_ENABLED: bool = Field(default=False, env="STORY_SEARCH_ENABLED")  # type: ignore
     STORY_CONTEXT_WINDOW: int = Field(default=10, env="STORY_CONTEXT_WINDOW")  # type: ignore
     STORY_SAVE_INTERVAL: int = Field(default=1, env="STORY_SAVE_INTERVAL")  # type: ignore
@@ -101,9 +100,10 @@ class Settings(BaseSettings):
 
     # ===== Fine-tuning =====
     FINETUNE_OUTPUT_DIR: str = Field(
-        default="./fine_tuned_models", env="FINETUNE_OUTPUT_DIR"  # type: ignore
+        default="/mnt/c/AI_LLM_projects/ai_warehouse/fine_tuned_models", env="FINETUNE_OUTPUT_DIR"  # type: ignore
     )
-    TRAINING_DATA_DIR: str = Field(default="./training_data", env="TRAINING_DATA_DIR")  # type: ignore
+    TRAINING_DATA_DIR: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/training_data", env="TRAINING_DATA_DIR")  # type: ignore
+    FINETUNE_DATA_DIR: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/fine_tuned_data", env="FINETUNE_DATA_DIR")  # type: ignore
     FINETUNE_CHECKPOINT_DIR: str = Field(
         default="./checkpoints", env="FINETUNE_CHECKPOINT_DIR"  # type: ignore
     )
@@ -121,7 +121,16 @@ class Settings(BaseSettings):
 
     # Dataset / Token
     HFX_TOKEN: Optional[str] = Field(default=None, env="HFX_TOKEN")  # type: ignore
-    DATASET_CACHE_DIR: str = Field(default="./datasets_cache", env="DATASET_CACHE_DIR")  # type: ignore
+    DATASET_CACHE_DIR: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/datasets", env="DATASET_CACHE_DIR")  # type: ignore
+
+    # ===== Fine-Tuned Model =====
+    FINETUNED_MODEL_ENABLED: bool = Field(default=True, env="FINETUNED_MODEL_ENABLED")  # type: ignore
+    FINETUNED_BASE_MODEL: str = Field(default="deepseek-ai/deepseek-llm-7b-chat", env="FINETUNED_BASE_MODEL")  # type: ignore
+    FINETUNED_ADAPTER_PATH: str = Field(
+        default="/mnt/c/web-projects/elioverse-bot/models/sft_lora_balanced",
+        env="FINETUNED_ADAPTER_PATH"
+    )  # type: ignore
+    FINETUNED_USE_FOR_PERSONAS: bool = Field(default=True, env="FINETUNED_USE_FOR_PERSONAS")  # type: ignore
 
     # ===== Web Search (consolidated) =====
     WEB_SEARCH_ENABLED: bool = Field(default=True, env="WEB_SEARCH_ENABLED")  # type: ignore
@@ -130,9 +139,13 @@ class Settings(BaseSettings):
     WEB_SEARCH_TIMEOUT: int = Field(default=10, env="WEB_SEARCH_TIMEOUT")  # type: ignore
     BRAVE_API_KEY: Optional[str] = Field(default=None, env="BRAVE_API_KEY")  # type: ignore
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # >>> pydantic v2 settings config <<<
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",  # ignore other uninitialized .env variables ()Extra inputs are not permitted）
+    )
 
 
 settings = Settings()

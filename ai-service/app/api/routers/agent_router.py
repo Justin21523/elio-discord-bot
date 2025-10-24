@@ -528,12 +528,16 @@ async def agent_run(
         )
 
 
+class PersonaChallengeRequest(BaseModel):
+    persona_name: str = Field(..., description="Persona name")
+    messages: List[Dict[str, str]] = Field(..., description="User messages to filter")
+    max_replies: int = Field(5, ge=1, le=20)
+
+
 # Persona challenge endpoint
 @router.post("/persona-challenge")
 async def persona_challenge(
-    persona_name: str = Field(..., description="Persona name"),
-    messages: List[Dict[str, str]] = Field(..., description="User messages to filter"),
-    max_replies: int = Field(5, ge=1, le=20),
+    request: PersonaChallengeRequest,
     manager: ModelManager = Depends(get_model_manager),
 ):
     """
@@ -541,20 +545,20 @@ async def persona_challenge(
     """
     try:
         logger.info(
-            f"[AGENT] Persona challenge: {persona_name} ({len(messages)} messages)"
+            f"[AGENT] Persona challenge: {request.persona_name} ({len(request.messages)} messages)"
         )
 
         llm = await manager.get_llm()
 
         # Filter messages (scoring)
-        system_prompt = f"""You are evaluating which messages are directed at {persona_name}.
+        system_prompt = f"""You are evaluating which messages are directed at {request.persona_name}.
 Score each message from 0-10 based on relevance and engagement potential.
 Return JSON array: [{{"index": 0, "score": 8, "reason": "..."}}]"""
 
         filter_result = await llm.generate(
             system=system_prompt,
             prompt=f"Messages:\n"
-            + "\n".join([f"{i}. {m['content']}" for i, m in enumerate(messages)]),
+            + "\n".join([f"{i}. {m['content']}" for i, m in enumerate(request.messages)]),
             max_tokens=1024,
             temperature=0.3,
         )
@@ -569,17 +573,17 @@ Return JSON array: [{{"index": 0, "score": 8, "reason": "..."}}]"""
 
         # Generate replies for top messages
         top_messages = sorted(scores, key=lambda x: x.get("score", 0), reverse=True)[
-            :max_replies
+            :request.max_replies
         ]
 
         replies = []
         for item in top_messages:
             idx = item.get("index", 0)
-            if idx < len(messages):
-                msg = messages[idx]
+            if idx < len(request.messages):
+                msg = request.messages[idx]
 
                 reply_result = await llm.generate(
-                    system=f"You are {persona_name}. Respond naturally and in character.",
+                    system=f"You are {request.persona_name}. Respond naturally and in character.",
                     prompt=f"User said: {msg['content']}\n\nYour response:",
                     max_tokens=256,
                     temperature=0.8,
@@ -600,9 +604,9 @@ Return JSON array: [{{"index": 0, "score": 8, "reason": "..."}}]"""
         return {
             "ok": True,
             "data": {
-                "persona": persona_name,
+                "persona": request.persona_name,
                 "replies": replies,
-                "total_evaluated": len(messages),
+                "total_evaluated": len(request.messages),
             },
         }
 
