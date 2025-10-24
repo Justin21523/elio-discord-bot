@@ -1,11 +1,11 @@
-<<<<<<< HEAD
 /**
  * commands/persona.js
  * Persona command handlers: /persona meet, /persona act, /persona config
  */
 
+import { SlashCommandBuilder } from "discord.js";
 import { logger } from "../util/logger.js";
-import { ErrorCode } from "../config.js";
+import { ErrorCodes as ErrorCode } from "../config.js";
 import { successEmbed, errorEmbed, infoEmbed } from "../util/replies.js";
 import {
   getPersona,
@@ -13,20 +13,132 @@ import {
   getConfig,
   setConfig,
   affinityDelta,
-} from "../services/personasService.js";
-import { personaSay } from "../services/webhooksService.js";
+} from "../services/persona.js";
+import { sendAsPersona } from "../services/webhooks.js";
+
+export const data = new SlashCommandBuilder()
+  .setName("persona")
+  .setDescription("Interact with personas")
+  .addSubcommand((sub) =>
+    sub
+      .setName("meet")
+      .setDescription("Have a persona appear in a channel")
+      .addStringOption((opt) =>
+        opt
+          .setName("name")
+          .setDescription("Persona name")
+          .setRequired(true)
+      )
+      .addChannelOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("Channel for persona to appear in")
+          .setRequired(false)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("ask")
+      .setDescription("Ask a persona a question")
+      .addStringOption((opt) =>
+        opt
+          .setName("name")
+          .setDescription("Persona name")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("question")
+          .setDescription("Your question")
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("interact")
+      .setDescription("Interact with a persona")
+      .addStringOption((opt) =>
+        opt
+          .setName("name")
+          .setDescription("Persona name")
+          .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("action")
+          .setDescription("Type of interaction")
+          .setRequired(true)
+          .addChoices(
+            { name: "Tell a joke", value: "joke" },
+            { name: "Give a gift", value: "gift" },
+            { name: "Offer help", value: "help" },
+            { name: "Challenge", value: "challenge" },
+            { name: "Comfort", value: "comfort" },
+            { name: "Tease", value: "tease" }
+          )
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("affinity")
+      .setDescription("Check your affinity with a persona")
+      .addStringOption((opt) =>
+        opt
+          .setName("name")
+          .setDescription("Persona name")
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub.setName("list").setDescription("List available personas")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("config")
+      .setDescription("Manage persona configuration")
+      .addStringOption((opt) =>
+        opt
+          .setName("action")
+          .setDescription("Configuration action")
+          .setRequired(true)
+          .addChoices(
+            { name: "Get", value: "get" },
+            { name: "Set", value: "set" }
+          )
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("key")
+          .setDescription("Configuration key (for set)")
+          .setRequired(false)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("value")
+          .setDescription("Configuration value (for set)")
+          .setRequired(false)
+      )
+  );
 
 /**
  * Main persona command router
  * @param {ChatInputCommandInteraction} interaction
+ * @param {Object} services - Services object
  * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
  */
-export default async function handlePersona(interaction) {
+export async function execute(interaction, services) {
+  await interaction.deferReply();
   const subcommand = interaction.options.getSubcommand();
 
   switch (subcommand) {
     case "meet":
       return await handlePersonaMeet(interaction);
+    case "ask":
+      return await handlePersonaAsk(interaction, services);
+    case "interact":
+      return await handlePersonaInteract(interaction);
+    case "affinity":
+      return await handlePersonaAffinity(interaction);
     case "list":
       return await handlePersonaList(interaction);
     case "config":
@@ -76,12 +188,7 @@ async function handlePersonaMeet(interaction) {
         : `Hello! I'm ${persona.name}.`;
 
     // Send as persona via webhook
-    const sayResult = await personaSay({
-      client: interaction.client,
-      channelId: targetChannel.id,
-      persona,
-      content: greeting,
-    });
+    const sayResult = await sendAsPersona(targetChannel.id, persona, { content: greeting });
 
     if (!sayResult.ok) {
       await interaction.editReply({
@@ -194,6 +301,278 @@ async function handlePersonaList(interaction) {
 }
 
 /**
+ * Handle /persona ask <name> <question>
+ */
+async function handlePersonaAsk(interaction, services) {
+  try {
+    const personaName = interaction.options.getString("name", true);
+    const question = interaction.options.getString("question", true);
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
+
+    // Get persona
+    const personaResult = await getPersona(personaName);
+    if (!personaResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Persona Not Found",
+            `Persona "${personaName}" doesn't exist.`
+          ),
+        ],
+      });
+      return personaResult;
+    }
+
+    const persona = personaResult.data;
+
+    // Use AI service to generate response
+    const aiResult = await services.ai.persona.compose(question, persona);
+
+    if (!aiResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "AI Error",
+            "Failed to generate response. Please try again."
+          ),
+        ],
+      });
+      return aiResult;
+    }
+
+    // Send response as persona via webhook
+    const channel = interaction.channel;
+    await sendAsPersona(channel.id, persona, { content: aiResult.data.text });
+
+    // Update affinity
+    await affinityDelta({
+      guildId,
+      userId,
+      personaId: persona._id.toString(),
+      delta: { friendship: 1, trust: 1 },
+      action: "ask",
+    });
+
+    await interaction.editReply({
+      embeds: [successEmbed("Question Asked", `${persona.name} has responded!`)],
+    });
+
+    return { ok: true };
+  } catch (error) {
+    logger.error("[CMD] /persona ask failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to ask persona",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Handle /persona interact <name> <action>
+ */
+async function handlePersonaInteract(interaction) {
+  try {
+    const personaName = interaction.options.getString("name", true);
+    const action = interaction.options.getString("action", true);
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
+
+    // Get persona
+    const personaResult = await getPersona(personaName);
+    if (!personaResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Persona Not Found",
+            `Persona "${personaName}" doesn't exist.`
+          ),
+        ],
+      });
+      return personaResult;
+    }
+
+    const persona = personaResult.data;
+
+    // Get action deltas from persona data
+    const actionData = persona.actions?.[action];
+
+    if (!actionData) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Action Not Available",
+            `${persona.name} doesn't respond to "${action}"`
+          ),
+        ],
+      });
+      return { ok: false };
+    }
+
+    // Apply affinity delta
+    await affinityDelta({
+      guildId,
+      userId,
+      personaId: persona._id.toString(),
+      delta: {
+        friendship: actionData.friendship || 0,
+        trust: actionData.trust || 0,
+        dependence: actionData.dependence || 0,
+      },
+      action,
+    });
+
+    // Generate response message
+    const responses = {
+      joke: `${persona.name} laughs at your joke! 😄`,
+      gift: `${persona.name} gratefully accepts your gift! 🎁`,
+      help: `${persona.name} appreciates your help! 🤝`,
+      challenge: `${persona.name} accepts your challenge! 💪`,
+      comfort: `${persona.name} feels comforted! 💙`,
+      tease: `${persona.name} reacts to your teasing! 😏`,
+    };
+
+    const friendshipChange =
+      actionData.friendship > 0
+        ? ` +${actionData.friendship} friendship`
+        : actionData.friendship < 0
+        ? ` ${actionData.friendship} friendship`
+        : "";
+    const trustChange =
+      actionData.trust > 0
+        ? ` +${actionData.trust} trust`
+        : actionData.trust < 0
+        ? ` ${actionData.trust} trust`
+        : "";
+
+    const changes = [friendshipChange, trustChange].filter((c) => c).join(",");
+
+    await interaction.editReply({
+      embeds: [
+        successEmbed(
+          "Interaction Complete",
+          `${responses[action]}\n\n**Changes:** ${changes || "None"}\n\n${
+            actionData.notes ? `_${actionData.notes}_` : ""
+          }`
+        ),
+      ],
+    });
+
+    return { ok: true };
+  } catch (error) {
+    logger.error("[CMD] /persona interact failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to interact with persona",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Handle /persona affinity <name>
+ */
+async function handlePersonaAffinity(interaction) {
+  try {
+    const personaName = interaction.options.getString("name", true);
+    const guildId = interaction.guildId;
+    const userId = interaction.user.id;
+
+    // Get persona
+    const personaResult = await getPersona(personaName);
+    if (!personaResult.ok) {
+      await interaction.editReply({
+        embeds: [
+          errorEmbed(
+            "Persona Not Found",
+            `Persona "${personaName}" doesn't exist.`
+          ),
+        ],
+      });
+      return personaResult;
+    }
+
+    const persona = personaResult.data;
+
+    // Get affinity data from database
+    const { getCollection } = await import("../db/mongo.js");
+    const affinityCol = getCollection("persona_affinity");
+    const affinityDoc = await affinityCol.findOne({
+      guildId,
+      userId,
+      persona: persona._id.toString(),
+    });
+
+    const friendship = affinityDoc?.friendship || 0;
+    const trust = affinityDoc?.trust || 0;
+    const dependence = affinityDoc?.dependence || 0;
+    const total = friendship + trust + dependence;
+
+    // Determine relationship level
+    let level = "Stranger";
+    let emoji = "👤";
+    if (total >= 60) {
+      level = "Best Friends";
+      emoji = "💖";
+    } else if (total >= 35) {
+      level = "Close Friends";
+      emoji = "💙";
+    } else if (total >= 15) {
+      level = "Friends";
+      emoji = "😊";
+    } else if (total >= 5) {
+      level = "Acquaintance";
+      emoji = "🙂";
+    }
+
+    const description =
+      `**Relationship:** ${emoji} ${level}\n\n` +
+      `**Friendship:** ${friendship}\n` +
+      `**Trust:** ${trust}\n` +
+      `**Dependence:** ${dependence}\n\n` +
+      `**Total Affinity:** ${total}\n\n` +
+      `_Keep interacting with ${persona.name} to strengthen your bond!_`;
+
+    const embed = infoEmbed(`Affinity with ${persona.name}`, description);
+    if (persona.avatarUrl || persona.avatar) {
+      embed.thumbnail = { url: persona.avatarUrl || persona.avatar };
+    }
+
+    await interaction.editReply({
+      embeds: [embed],
+    });
+
+    return { ok: true };
+  } catch (error) {
+    logger.error("[CMD] /persona affinity failed", {
+      guildId: interaction.guildId,
+      error: error.message,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to check affinity",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
  * Handle /persona config get|set
  */
 async function handlePersonaConfig(interaction) {
@@ -284,80 +663,5 @@ async function handlePersonaConfig(interaction) {
         cause: error,
       },
     };
-=======
-// src/commands/persona.js
-// User-facing persona interactions: /persona meet, /persona act
-
-import { SlashCommandBuilder } from "discord.js";
-import * as Persona from "../services/persona.js";
-import { formatErrorEmbed, safeEdit } from "../util/replies.js";
-import { incCounter, observeHistogram } from "../util/metrics.js";
-
-export const data = new SlashCommandBuilder()
-  .setName("persona")
-  .setDescription("Meet and interact with a persona.")
-  .addSubcommand(sc =>
-    sc.setName("meet")
-      .setDescription("Invite the persona to speak")
-      .addStringOption(o => o.setName("name").setDescription("Persona name").setRequired(true))
-  )
-  .addSubcommand(sc =>
-    sc.setName("act")
-      .setDescription("Perform an action to change affinity")
-      .addStringOption(o => o.setName("name").setDescription("Persona name").setRequired(true))
-      .addStringOption(o => o.setName("action").setDescription("Action")
-        .addChoices(
-          { name: "joke", value: "joke" },
-          { name: "gift", value: "gift" },
-          { name: "help", value: "help" },
-          { name: "challenge", value: "challenge" }
-        ).setRequired(true))
-  )
-  .setDMPermission(false);
-
-export async function execute(interaction) {
-  const startedAt = Date.now();
-  const sub = interaction.options.getSubcommand();
-  const guildId = interaction.guildId;
-  const channelId = interaction.channelId;
-  const name = interaction.options.getString("name", true);
-  const persona = { id: name.toLowerCase(), name };
-
-  try {
-    await interaction.deferReply({ ephemeral: false });
-
-    if (sub === "meet") {
-      const res = await Persona.meet({ guildId, channelId, persona });
-      if (!res.ok) return safeEdit(interaction, formatErrorEmbed(res.error, "Meet failed"));
-      await safeEdit(interaction, { content: `🎭 **${name}** joined the chat.` });
-      incCounter("commands_total", { command: "persona.meet.cmd" });
-    }
-
-    if (sub === "act") {
-      const action = interaction.options.getString("action", true);
-      const res = await Persona.act({ guildId, userId: interaction.user.id, persona, action });
-      if (!res.ok) return safeEdit(interaction, formatErrorEmbed(res.error, "Action failed"));
-
-      const p = res.data.profile;
-      await safeEdit(interaction, {
-        embeds: [{
-          title: `Persona • ${name}`,
-          description:
-            `Action: **${action}**\n` +
-            `Delta: \`F${res.data.delta.friendship} / T${res.data.delta.trust} / D${res.data.delta.dependence}\`\n` +
-            `Now: **F${p.friendship} / T${p.trust} / D${p.dependence}** • _${p.levelHint}_`,
-          color: 0x6aa7ff,
-        }],
-      });
-      incCounter("commands_total", { command: "persona.act.cmd" });
-    }
-
-  } catch (error) {
-    await safeEdit(interaction, formatErrorEmbed({ code: "UNKNOWN", message: String(error) }, "Persona error"));
-  } finally {
-    const ms = (Date.now() - startedAt) / 1000;
-    observeHistogram("command_latency_seconds", ms, { command: `persona.${sub}` });
-    console.log("[CMD][persona]", { guildId, sub, latency_s: ms.toFixed(3) });
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
   }
 }
