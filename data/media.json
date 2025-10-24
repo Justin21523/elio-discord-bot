@@ -2,22 +2,106 @@
   "media": [
     {
       "type": "gif",
-      "url": "https://media.tenor.com/LYKXQ0-gif1.gif",
-      "tags": ["elio", "cheer"],
+      "url": "https://media.giphy.com/media/3o7TKsQ8MqcE1y0RuU/giphy.gif",
+      "tags": ["space", "stars", "animated"],
       "nsfw": false,
       "enabled": true
     },
     {
       "type": "image",
-      "url": "https://images.example.com/elio/star-smile.png",
-      "tags": ["elio", "stars", "wholesome"],
+      "url": "https://i.imgur.com/X2vJ8Kq.png",
+      "tags": ["elio", "character", "ambassador"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/l0HlBO7eyXzSZkJri/giphy.gif",
+      "tags": ["funny", "reaction"],
       "nsfw": false,
       "enabled": true
     },
     {
       "type": "image",
-      "url": "https://images.example.com/meme/glordon-potatoes.jpg",
-      "tags": ["glordon", "potato", "meme"],
+      "url": "https://i.imgur.com/7JW9Xqw.png",
+      "tags": ["glordon", "potato", "aliens"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif",
+      "tags": ["celebration", "party"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://i.imgur.com/9KnH4wJ.png",
+      "tags": ["caleb", "character", "serious"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/3oriO0OEd9QIDdllqo/giphy.gif",
+      "tags": ["space", "galaxy", "cosmic"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif",
+      "tags": ["alien", "ufo", "funny"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://i.imgur.com/wormhole.png",
+      "tags": ["wormhole", "portal", "travel"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif",
+      "tags": ["thinking", "pondering", "question"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://i.imgur.com/council.png",
+      "tags": ["council", "meeting", "diplomacy"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/3o7aCTPPm4OHfRLSH6/giphy.gif",
+      "tags": ["excited", "happy", "joy"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://i.imgur.com/spaceship.png",
+      "tags": ["spaceship", "travel", "adventure"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "gif",
+      "url": "https://media.giphy.com/media/l0IylOPCNkiqOgMyA/giphy.gif",
+      "tags": ["confused", "puzzled", "reaction"],
+      "nsfw": false,
+      "enabled": true
+    },
+    {
+      "type": "image",
+      "url": "https://i.imgur.com/planet.png",
+      "tags": ["planet", "home", "communiverse"],
       "nsfw": false,
       "enabled": true
     }
