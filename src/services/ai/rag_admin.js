@@ -6,7 +6,7 @@
 // All functions return Result<T>.
 
 import { httpGet, httpPostJson } from './_client.js';
-import { CONFIG } from '../../config.js';
+import { RAG_INDEX_NAME, AI_SERVICE_TIMEOUT_MS } from '../../config.js';
 
 export async function listDocs(namespace) {
   const path = namespace ? `/rag/docs?namespace=${encodeURIComponent(namespace)}` : '/rag/docs';
@@ -56,11 +56,11 @@ export async function importIndex(dump) {
 
 export async function exportData({ limit = 200, format = 'json' } = {}) {
   const payload = {
-    index: { name: CONFIG.rag.indexName, provider: CONFIG.rag.provider },
+    index: { name: RAG_INDEX_NAME, provider: 'atlas' },
     limit, format,
   };
   try {
-    const res = await httpPostJson('/rag/export', payload, Math.max(CONFIG.embeddings.timeoutMs, 20000));
+    const res = await httpPostJson('/rag/export', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'DB_ERROR', message: 'RAG export failed', cause: res.json } };
     }
@@ -72,13 +72,13 @@ export async function exportData({ limit = 200, format = 'json' } = {}) {
 
 export async function purge({ olderThanDays, source, confirm = false } = {}) {
   const payload = {
-    index: { name: CONFIG.rag.indexName, provider: CONFIG.rag.provider },
+    index: { name: RAG_INDEX_NAME, provider: 'atlas' },
     older_than_days: olderThanDays,
     source,
     confirm: Boolean(confirm),
   };
   try {
-    const res = await httpPostJson('/rag/purge', payload, Math.max(CONFIG.embeddings.timeoutMs, 20000));
+    const res = await httpPostJson('/rag/purge', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'DB_ERROR', message: 'RAG purge failed', cause: res.json } };
     }
