@@ -1,9 +1,9 @@
 // Shared HTTP client for AI sidecar. English-only code/comments.
-import { CONFIG } from '../../config.js';
+import { AI_SERVICE_URL, AI_SERVICE_TIMEOUT_MS } from '../../config.js';
 
-const BASE = () => CONFIG.ai.baseUrl.replace(/\/+$/, '');
+const BASE = () => (AI_SERVICE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
-export async function httpPostJson(path, body, timeoutMs = CONFIG.ai.timeoutMs) {
+export async function httpPostJson(path, body, timeoutMs = AI_SERVICE_TIMEOUT_MS) {
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort('timeout'), timeoutMs);
   try {
@@ -20,7 +20,7 @@ export async function httpPostJson(path, body, timeoutMs = CONFIG.ai.timeoutMs) 
   }
 }
 
-export async function httpPostForm(path, formData, timeoutMs = CONFIG.ai.timeoutMs) {
+export async function httpPostForm(path, formData, timeoutMs = AI_SERVICE_TIMEOUT_MS) {
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort('timeout'), timeoutMs);
   try {
@@ -36,7 +36,7 @@ export async function httpPostForm(path, formData, timeoutMs = CONFIG.ai.timeout
   }
 }
 
-export async function httpGet(path, timeoutMs = CONFIG.ai.timeoutMs) {
+export async function httpGet(path, timeoutMs = AI_SERVICE_TIMEOUT_MS) {
   const controller = new AbortController();
   const to = setTimeout(() => controller.abort('timeout'), timeoutMs);
   try {
