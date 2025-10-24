@@ -2,7 +2,7 @@
 // Dev-only helper: mark all scenario_sessions of a guild/channel inactive, or remove them.
 
 import { MongoClient } from "mongodb";
-import { CONFIG } from "../src/config.js";
+import { config } from "../src/config.js";
 
 async function main() {
   const guildId = process.argv[2];
@@ -12,9 +12,9 @@ async function main() {
     process.exit(1);
   }
   const remove = process.argv.includes("--remove");
-  const client = new MongoClient(CONFIG.MONGODB_URI);
+  const client = new MongoClient(config.MONGODB_URI);
   await client.connect();
-  const db = client.db(CONFIG.DB_NAME);
+  const db = client.db(config.DB_NAME);
 
   try {
     const filter = { guildId: String(guildId) };

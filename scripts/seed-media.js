@@ -5,15 +5,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { MongoClient } from 'mongodb';
 import 'dotenv/config';
-import { CONFIG } from '../src/config.js';
+import { config } from '../src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function main() {
-  const client = new MongoClient(CONFIG.MONGODB_URI);
+  const uri = process.env.MONGODB_URI || config.mongodb?.uri || 'mongodb://localhost:27017';
+  const dbName = process.env.DB_NAME || config.mongodb?.name || 'communiverse_bot';
+
+  const client = new MongoClient(uri);
   await client.connect();
-  const db = client.db(CONFIG.DB_NAME);
+  const db = client.db(dbName);
 
   const f = path.join(__dirname, '..', 'data', 'media.json');
   const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
