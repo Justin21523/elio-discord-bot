@@ -56,7 +56,7 @@ FINETUNE_OUTPUT_DIR=/mnt/c/AI_LLM_projects/ai_warehouse/fine_tuned_models
 **File**: `ai-service/Dockerfile`
 
 **Key Updates**:
-- Base image: `nvidia/cuda:12.8.0-cudnn9-runtime-ubuntu22.04`
+- Base image: `nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04`
 - GPU-specific environment variables for RTX 5080
 - Warehouse volume mount paths configured
 - Health checks with 120s startup period for model loading
