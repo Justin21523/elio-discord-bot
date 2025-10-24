@@ -4,18 +4,12 @@
 # GPU Support: NVIDIA RTX 5080 with CUDA 12.8
 # ============================================================================
 
-version: "3.9"
-
 services:
   # -------------------------
   # MongoDB Database Service
   # -------------------------
   mongo:
     image: mongo:7
-<<<<<<< HEAD
-=======
-    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_mongo_1
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
     restart: unless-stopped
     ports: ["27017:27017"]
     environment:
@@ -23,9 +17,9 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: devpass
       MONGO_INITDB_DATABASE: communiverse_bot
     volumes:
-      - mongo-data:/data/db
+      - mongo_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     command: ["--auth"]
-<<<<<<< HEAD
     networks:
       - elioverse-network
     healthcheck:
@@ -34,64 +28,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-=======
-    healthcheck:
-      test: ["CMD", "mongosh", "-u", "dev", "-p", "devpass", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-
-  ai-python:
-    build:
-      context: ./ai-python
-      dockerfile: Dockerfile
-    image: communiverse-ai:1.1.0
-    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_ai_1
-    restart: unless-stopped
-    environment:
-      # ---- Runtime flags ----
-      ENABLE_CUDA: "${ENABLE_CUDA:-1}"            # "1" to enable CUDA; requires nvidia runtime
-      HF_HOME: /root/.cache/huggingface
-      SENTENCE_TRANSFORMERS_HOME: /root/.cache/huggingface/sentence-transformers
-      HF_HUB_ENABLE_HF_TRANSFER: "1"
-      TOKENIZERS_PARALLELISM: "false"
-      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128"
-
-      # ---- Models (propagate from .env) ----
-      LLM_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
-      LLM_CHAT_MODEL: ${LLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
-      VLM_MODEL: ${VLM_MODEL:-llava-1.6}
-      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-BAAI/bge-m3}
-
-      # ---- Mongo for sidecar RAG (Atlas 或本機) ----
-      MONGO_URI: ${MONGODB_URI}
-      MONGO_DB: ${DB_NAME:-communiverse_bot}
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-      - ./ai-python:/srv/app
-    working_dir: /srv/app
-    command: >
-      bash -lc "pip install -r requirements.txt
-      && uvicorn app.main:app --host 0.0.0.0 --port 8888"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]   # remove if no GPU
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8888/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 50
-      start_period: 600s   # 首次下載模型/權重很慢，給足時間
-    ports: ["8888:8888"]
-    depends_on:
-      mongo:
-        condition: service_healthy
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
 
   # -------------------------
-  # Python AI Service (GPU-enabled)
+  # Python AI Service (GPU-enabled, Optimized)
   # -------------------------
   ai-service:
     build:
@@ -111,78 +50,94 @@ services:
       MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
       MONGODB_DB: ${DB_NAME:-communiverse_bot}
 
-      # GPU configuration
+      # GPU configuration (Optimized for RTX 5080)
       CUDA_VISIBLE_DEVICES: 0
-      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
+      # CUDA memory optimization: prevent fragmentation, limit max split
+      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:256,expandable_segments:True
       TORCH_DTYPE: float16
+      USE_8BIT: "true"   # Use 8-bit quantization (original config)
+      USE_4BIT: "false"  # Disable 4-bit quantization
+
+      # Fine-tuned model (user's custom model)
+      FINETUNED_MODEL_ENABLED: "true"
+      FINETUNED_BASE_MODEL: "deepseek-ai/deepseek-llm-7b-chat"
+      FINETUNED_ADAPTER_PATH: "/app/models/sft_lora_balanced"
+      FINETUNED_USE_FOR_PERSONAS: "true"
 
       # Service configuration
       HOST: 0.0.0.0
       PORT: 8000
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MAX_MEMORY_GB: 12  # Reduced from 16 to leave room for system
+
+      # Model preloading (Original config with 8-bit quantization)
+      PRELOAD_EMBEDDINGS: "true"   # Critical for RAG - ~2GB
+      PRELOAD_LLM: "true"          # Preload with 8-bit (~7GB) - original config
+      PRELOAD_VLM: "false"         # VLM loaded on-demand only
+
+      # Performance tuning
+      MAX_BATCH_SIZE: 4            # Reduced from 8 to save memory
+      GENERATION_TIMEOUT: 45       # Reduced from 60s
+      MODEL_LOAD_TIMEOUT: 240      # Reduced from 300s
+
+      # Rate limiting
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_REQUESTS: 50      # Reduced from 100 for stability
+      RATE_LIMIT_WINDOW: 60
+
     volumes:
       # Mount shared AI warehouse (host path -> container path)
-      - /mnt/c/AI_LLM_projects/ai_warehouse:/mnt/ai_warehouse
+      - /mnt/c/AI_LLM_projects/ai_warehouse:/mnt/ai_warehouse:ro  # Read-only for safety
 
-      # Optional: Mount logs directory
+      # Mount fine-tuned models directory
+      - ./models:/app/models:ro  # Read-only
+
+      # Mount logs directory
       - ./ai-service/logs:/app/logs
+
     networks:
       - elioverse-network
-    # GPU access (requires NVIDIA Container Toolkit)
+
+    # GPU access with memory limits
     deploy:
       resources:
+        limits:
+          cpus: '4'              # Limit CPU to 4 cores
+          memory: 16G            # Limit system memory
         reservations:
+          cpus: '2'              # Reserve 2 cores minimum
+          memory: 8G             # Reserve 8GB minimum
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 90s  # Increased for model preloading
 
   # -------------------------
-  # Discord Bot Service
+  # Discord Bot Service (Optimized)
   # -------------------------
   bot:
     build:
       context: .
       dockerfile: Dockerfile
-<<<<<<< HEAD
     restart: unless-stopped
     depends_on:
       mongo:
         condition: service_healthy
       ai-service:
-        condition: service_healthy
+        condition: service_healthy  # Wait for AI service to be fully ready
     env_file:
       - .env
     environment:
       # MongoDB connection
       MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
-=======
-    image: communiverse-bot:1.1.0
-    container_name: ${COMPOSE_PROJECT_NAME:-elioverse}_bot_1
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      # ---- override/ensure criticals for bot process ----
-      AI_API_BASE_URL: ${AI_API_BASE_URL:-http://ai-python:8888}
-      AI_HEALTH_URL: http://ai-python:8888/health
-      MONGODB_URI: ${MONGODB_URI}
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
       DB_NAME: ${DB_NAME:-communiverse_bot}
-    depends_on:
-      ai-python:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    volumes:
-      - ./:/app
-    working_dir: /app
-    command: ["node","src/index.js"]
 
       # AI Service connection
       AI_SERVICE_URL: http://ai-service:8000
@@ -190,11 +145,31 @@ services:
 
       # Bot configuration
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+
+      # Memory optimization
+      NODE_OPTIONS: --max-old-space-size=2048
+
     volumes:
-      # Optional: Mount logs directory
+      # Mount logs directory
       - ./logs:/app/logs
+
+      # Mount data directory (read-only for safety)
+      - ./data:/app/data:ro
+
     networks:
       - elioverse-network
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'              # Limit CPU to 2 cores
+          memory: 3G             # Limit memory to 3GB
+        reservations:
+          cpus: '1'              # Reserve 1 core minimum
+          memory: 1G             # Reserve 1GB minimum
+
     healthcheck:
       test:
         [
@@ -206,7 +181,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 40s  # Increased for AI service dependency
 
 # -------------------------
 # Networks
@@ -219,10 +194,5 @@ networks:
 # Volumes
 # -------------------------
 volumes:
-<<<<<<< HEAD
   mongo_data:
     driver: local
-=======
-  mongo-data:
-  hf-cache:
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
