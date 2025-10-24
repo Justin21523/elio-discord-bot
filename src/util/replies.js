@@ -1,11 +1,10 @@
-<<<<<<< HEAD
 /**
  * util/replies.js
  * Helper functions for consistent Discord reply formatting.
  * Never exposes stack traces or sensitive data to users.
  */
 
-import { ErrorCode } from "../config.js";
+import { ErrorCodes as ErrorCode } from "../config.js";
 
 /**
  * Format a friendly error message based on error code
@@ -47,96 +46,6 @@ export function formatErrorReply(error) {
     !error.message.includes("stack")
   ) {
     return `${friendlyMessage}\n*${error.message}*`;
-=======
-import { MessageFlags } from "discord.js";
-
-export function ok(data) {
-  return { ok: true, data };
-}
-
-export async function fail(interaction, error) {
-  const content = `❌ ${error?.message || "Something went wrong."}\nErrorCode: ${error?.code || "UNKNOWN"}`;
-
-  try {
-    if (!interaction.deferred && !interaction.replied) {
-      await interaction.reply({ content, ephemeral: true });
-    } else {
-      await interaction.editReply({ content });
-    }
-  } catch {
-    // Last resort: followUp
-    try {
-      await interaction.followUp({ content, ephemeral: true });
-    } catch { /* swallow */ }
-  }
-}
-
-export async function defer(i, { ephemeral = false } = {}) {
-  try {
-    if (i.deferred || i.replied) return;
-    const opts = ephemeral ? { flags: MessageFlags.Ephemeral } : {};
-    await i.deferReply(opts);
-  } catch (e) {
-    console.log("[ERR] defer failed:", e);
-  }
-}
-
-export async function reply(i, content, { ephemeral = false } = {}) {
-  const payload = typeof content === "string" ? { content } : content;
-  if (ephemeral) payload.flags = MessageFlags.Ephemeral;
-  if (i.deferred || i.replied) return i.editReply(payload);
-  return i.reply(payload);
-}
-
-/**
- * Send ephemeral error reply
- * @param {import('discord.js').Interaction} interaction
- * @param {string} message
- */
-export async function replyError(interaction, message) {
-  const content = `❌ ${message}`;
-
-  if (interaction.deferred || interaction.replied) {
-    await interaction.editReply({ content, ephemeral: true });
-  } else {
-    await interaction.reply({ content, ephemeral: true });
-  }
-}
-
-/**
- * Send success reply
- * @param {import('discord.js').Interaction} interaction
- * @param {string} message
- * @param {boolean} ephemeral
- */
-export async function replySuccess(interaction, message, ephemeral = false) {
-  const content = `✅ ${message}`;
-
-  if (interaction.deferred || interaction.replied) {
-    await interaction.editReply({ content, ephemeral });
-  } else {
-    await interaction.reply({ content, ephemeral });
-  }
-}
-
-/**
- * Defer reply with optional ephemeral
- * @param {import('discord.js').Interaction} interaction
- * @param {boolean} ephemeral
- */
-export async function deferReply(interaction, ephemeral = false) {
-  if (!interaction.deferred && !interaction.replied) {
-    await interaction.deferReply({ ephemeral });
-  }
-}
-
-export async function safeDefer(interaction, ephemeral = true) {
-  if (interaction.deferred || interaction.replied) return;
-  try {
-    await interaction.deferReply({ ephemeral });
-  } catch (e) {
-    // Ignore "Unknown interaction" race
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
   }
 
   return friendlyMessage;
@@ -239,5 +148,81 @@ export async function ensureDeferred(interaction, ephemeral = false) {
     }
   } catch {
     // ignore; if already replied/deferred, discord.js may throw
+  }
+}
+
+/**
+ * Send an error reply to an interaction
+ * @param {import('discord.js').CommandInteraction} interaction
+ * @param {Object|string} errorOrMessage - Error object or string message
+ */
+export async function sendErrorReply(interaction, errorOrMessage) {
+  let payload;
+
+  if (typeof errorOrMessage === 'string') {
+    payload = { content: `❌ ${errorOrMessage}`, ephemeral: true };
+  } else if (errorOrMessage && typeof errorOrMessage === 'object') {
+    const errorMessage = formatErrorReply(errorOrMessage);
+    payload = { content: errorMessage, ephemeral: true };
+  } else {
+    payload = { content: '❌ An error occurred', ephemeral: true };
+  }
+
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(payload);
+    } else {
+      await interaction.reply(payload);
+    }
+  } catch {
+    // Ignore Discord API errors
+  }
+}
+
+/**
+ * Send a success reply to an interaction
+ * @param {import('discord.js').CommandInteraction} interaction
+ * @param {Object|string} messageOrOptions - String message or options object with title/description/image
+ */
+export async function sendSuccessReply(interaction, messageOrOptions) {
+  let payload;
+
+  if (typeof messageOrOptions === 'string') {
+    payload = { content: `✅ ${messageOrOptions}` };
+  } else if (messageOrOptions && typeof messageOrOptions === 'object') {
+    // Handle embed format
+    const { title, description, image, color = 0x00ff00 } = messageOrOptions;
+
+    const embed = {
+      color,
+      title: title || '✅ Success',
+      description: description || '',
+      timestamp: new Date().toISOString(),
+    };
+
+    if (image) {
+      embed.image = { url: image };
+    }
+
+    payload = { embeds: [embed] };
+  } else {
+    payload = { content: '✅ Success' };
+  }
+
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(payload);
+    } else {
+      await interaction.reply(payload);
+    }
+  } catch (error) {
+    // Log Discord API errors for debugging
+    console.error('[ERR] sendSuccessReply failed:', error.message);
+    // Try followUp as fallback
+    try {
+      await interaction.followUp({ ...payload, ephemeral: true });
+    } catch {
+      // If even followUp fails, give up silently
+    }
   }
 }
