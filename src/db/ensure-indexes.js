@@ -81,6 +81,33 @@ export async function ensureIndexes() {
   await db.collection('profiles').createIndex({ guildId: 1, userId: 1 }, { unique: true });
   await db.collection('profiles').createIndex({ guildId: 1, points: -1, updatedAt: -1 });
 
+  // rag_chunks: vector search + BM25 text search + metadata filters
+  await db.collection('rag_chunks').createIndex({ id: 1 }, { unique: true });
+  await db.collection('rag_chunks').createIndex({ 'meta.subject': 1, 'meta.type': 1 });
+  await db.collection('rag_chunks').createIndex({ 'meta.tags': 1 });
+  await db.collection('rag_chunks').createIndex({ 'meta.updated_at': -1 });
+  // Text index for BM25-style keyword search
+  await db.collection('rag_chunks').createIndex({ bm25Text: 'text', 'meta.source': 'text' });
+
+  // Vector search index (Atlas only - will error on local MongoDB, but that's OK)
+  // For local dev, use FAISS in-memory or skip vector search
+  try {
+    const RAG_EMBEDDING_DIM = parseInt(process.env.RAG_EMBEDDING_DIM || "1024", 10);
+    // Note: Vector search index must be created via Atlas UI or Admin API
+    // This is a placeholder for documentation
+    console.log(`[JOB] Vector search index should be created manually in Atlas for rag_chunks.embedding (${RAG_EMBEDDING_DIM}D, cosine)`);
+  } catch (e) {
+    console.warn('[JOB] Vector index creation skipped (Atlas only)');
+  }
+
+  // conversation_memory: for channel summaries and context
+  await db.collection('conversation_memory').createIndex({ guildId: 1, channelId: 1, timestamp: -1 });
+  await db.collection('conversation_memory').createIndex({ timestamp: -1 });
+
+  // dm_sessions: for DM mini-game tracking
+  await db.collection('dm_sessions').createIndex({ userId: 1, active: 1 });
+  await db.collection('dm_sessions').createIndex({ createdAt: -1 });
+
   console.log(`[JOB] indexes ensured (validators ${validatorsApplied ? "applied" : "skipped"})`);
   await client.close();
 }
