@@ -18,13 +18,13 @@ fi
 # Download all models
 echo ""
 echo "🤖 Downloading all models..."
-python scripts/download_models.py --all
+python ai-service/scripts/download_models.py --all
 
 # Download all priority 1 & 2 datasets
 echo ""
 echo "📊 Downloading essential and recommended datasets..."
-python scripts/download_datasets.py --priority 1
-python scripts/download_datasets.py --priority 2
+python ai-service/scripts/download_datasets.py --priority 1
+python ai-service/scripts/download_datasets.py --priority 2
 
 echo ""
 echo "✅ All downloads complete!"

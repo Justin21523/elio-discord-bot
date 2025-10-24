@@ -157,3 +157,12 @@ export async function postGreeting({ channelId, personaName, tags, context }) {
     return err("DISCORD_API_ERROR", "Failed to post greeting", cause);
   }
 }
+
+// Default export for backward compatibility
+export default {
+  upsertMany,
+  list,
+  pickRandom,
+  composeEmbed,
+  postGreeting,
+};

@@ -5,8 +5,9 @@
 # Compute Capability: sm120
 # ============================================================================
 
-# Use NVIDIA CUDA 12.8 base image with cuDNN for RTX 5080
-FROM nvidia/cuda:12.8.0-cudnn9-runtime-ubuntu22.04
+# Use NVIDIA CUDA 12.8 base image with cuDNN (compatible with RTX 5080)
+# CUDA 12.8 matches PyTorch cu128 build and RTX 5080 sm_120 architecture
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 # Set non-interactive installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -39,7 +40,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
-COPY scripts/ ./scripts/ 
+COPY scripts/ ./scripts/
 
 # Expose ports
 EXPOSE 8000 9091

@@ -48,7 +48,6 @@ dump/
 backup/
 
 # local data
-data/
 .claude/
 models/
 

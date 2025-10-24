@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-.venv
-.env
-.env.*
-.vscode
-.git
-hf-cache
-data/
