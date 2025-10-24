@@ -1,162 +1,424 @@
 {
   "scenarios": [
     {
-      "prompt": "Glordon mishears ‘couch potato’ again. What should Elio do to calm the room?",
+      "prompt": "Elio accidentally shuts down the military base while sending his alien message. Aunt Olga is furious. What's the best way for Elio to respond?",
       "options": [
-        "Explain gently",
-        "Join the joke",
-        "Shush Caleb",
-        "Change topic"
+        "Apologize sincerely and explain his loneliness",
+        "Defend himself - the aliens matter more",
+        "Blame the equipment malfunction",
+        "Promise it won't happen again without explaining"
       ],
       "correctIndex": 0,
-      "tags": ["elio", "glordon", "caleb", "humor"],
+      "tags": ["elio", "olga", "responsibility", "film"],
       "enabled": true,
       "weight": 1,
       "hostPersonaName": "Elio"
     },
     {
-      "prompt": "Lord Grigon demands entry to the Communiverse. The council hesitates. What earns time to negotiate?",
+      "prompt": "Lord Grigon demands to join the Communiverse by force. The ambassadors are hesitant. What earns time to negotiate peacefully?",
       "options": [
-        "A firm no",
-        "Offer a trial mission",
-        "Public vote",
-        "Silent delay"
+        "Refuse him completely",
+        "Offer a trial mission to prove worth",
+        "Call for immediate vote",
+        "Ignore his demands"
       ],
       "correctIndex": 1,
-      "tags": ["council", "diplomacy"],
+      "tags": ["grigon", "diplomacy", "communiverse", "film"],
       "enabled": true,
       "weight": 1,
-      "hostPersonaName": "Elio"
+      "hostPersonaName": "Questa"
     },
     {
-      "prompt": "Caleb storms off after Glordon’s metaphor chaos. Best way to reel him back?",
+      "prompt": "Glordon confides in Elio that he doesn't want to be a warrior like his father expects. What should Elio say?",
       "options": [
-        "Sincere apology",
-        "Double down with memes",
-        "Silent follow",
-        "Call in a favor"
+        "Tell him to obey his father",
+        "Encourage him to be himself - they're both outcasts",
+        "Suggest he run away from Hylurg",
+        "Say nothing to avoid conflict"
+      ],
+      "correctIndex": 1,
+      "tags": ["glordon", "elio", "friendship", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Glordon"
+    },
+    {
+      "prompt": "Elio's lie about being Earth's ambassador is exposed by Questa's mind-reading. The Communiverse feels betrayed. How should Elio respond?",
+      "options": [
+        "Admit the truth and apologize humbly",
+        "Blame the ambassadors for the misunderstanding",
+        "Run away to avoid consequences",
+        "Defend his actions as necessary"
       ],
       "correctIndex": 0,
-      "tags": ["caleb", "repair"],
+      "tags": ["elio", "questa", "honesty", "film"],
       "enabled": true,
       "weight": 1,
       "hostPersonaName": "Elio"
     },
     {
-      "prompt": "Evacuation alert hits the ambassadors. What does Elio secure first?",
-      "options": ["Data core", "Family keepsakes", "Medical kit", "Fuel cells"],
-      "correctIndex": 2,
-      "tags": ["evacuation", "care"],
-      "enabled": true,
-      "weight": 1,
-      "hostPersonaName": "Elio"
-    },
-    {
-      "prompt": "Glordon wants to ‘train like a potato’. What helps without mocking him?",
+      "prompt": "Glordon is dying in the crashed shuttle on Earth. Olga and Elio need to get back to the Communiverse through dangerous space debris. What's the priority?",
       "options": [
-        "Set playful drills",
-        "Say it’s silly",
-        "Ignore him",
-        "Film for clout"
+        "Turn back - it's too dangerous",
+        "Call for help from ham radio operators worldwide",
+        "Try to navigate alone without help",
+        "Wait for the debris to clear"
+      ],
+      "correctIndex": 1,
+      "tags": ["elio", "glordon", "olga", "rescue", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Olga"
+    },
+    {
+      "prompt": "Caleb sees Elio planning a 'scenic route' near an asteroid belt. What's his most likely reaction?",
+      "options": [
+        "Agree enthusiastically",
+        "Veto it immediately - NOT SAFE FOR EXISTENCE!",
+        "Suggest a compromise route",
+        "Let Elio decide without input"
+      ],
+      "correctIndex": 1,
+      "tags": ["caleb", "elio", "safety", "humor", "rp"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Caleb"
+    },
+    {
+      "prompt": "Grigon discovers the Glordon clone is fake. He's enraged. What does Questa do to de-escalate?",
+      "options": [
+        "Use mind-reading to find real Glordon",
+        "Physically restrain Grigon",
+        "Negotiate for more time",
+        "Let Grigon destroy the Communiverse"
       ],
       "correctIndex": 0,
-      "tags": ["glordon", "kindness"],
+      "tags": ["grigon", "questa", "glordon", "crisis", "film"],
       "enabled": true,
       "weight": 1,
-      "hostPersonaName": "Elio"
+      "hostPersonaName": "Questa"
     },
     {
-      "prompt": "Council debate turns harsh. What Elio line diffuses tension?",
+      "prompt": "Bryce wants to apologize to Elio for the bullying. What's the best approach?",
       "options": [
-        "‘Calm down!’",
-        "Reflect feelings & reframe",
-        "Switch speakers",
-        "End the meeting"
+        "A grand public apology",
+        "A simple, sincere private apology",
+        "Buy an expensive gift",
+        "Avoid Elio forever"
       ],
       "correctIndex": 1,
-      "tags": ["mediation"],
+      "tags": ["bryce", "elio", "apology", "friendship", "film"],
       "enabled": true,
       "weight": 1,
-      "hostPersonaName": "Elio"
+      "hostPersonaName": "Bryce"
     },
     {
-      "prompt": "A rumor says the Communiverse was AI-made. What response builds trust?",
+      "prompt": "Ambassador Auva wants to consult the Universal User's Manual for conflict resolution. What section would she check?",
       "options": [
-        "Mock the rumor",
-        "Share making-of proof",
-        "Ban discussion",
-        "Do nothing"
+        "Section 7.3 - Friendship Protocols",
+        "Section 2.1 - Combat Strategies",
+        "Section 9.9 - Emergency Exits",
+        "Section 4.2 - Food Preparation"
       ],
-      "correctIndex": 1,
-      "tags": ["trust", "community"],
-      "enabled": true,
-      "weight": 1,
-      "hostPersonaName": "Elio"
-    },
-    {
-      "prompt": "Caleb privately admits he’s tired. What should Elio do?",
-      "options": [
-        "Tease him",
-        "Offer break & cover",
-        "Announce it",
-        "Give orders"
-      ],
-      "correctIndex": 1,
-      "tags": ["care", "caleb"],
-      "enabled": true,
-      "weight": 1,
-      "hostPersonaName": "Elio"
-    },
-    {
-      "prompt": "Helix kisses a family trinket before packing. What does that moment suggest?",
-      "options": [
-        "Careless prop",
-        "Hidden lore of Helix",
-        "Accidental shot",
-        "Comic relief"
-      ],
-      "correctIndex": 1,
-      "tags": ["helix", "lore"],
-      "enabled": true,
-      "weight": 1,
-      "hostPersonaName": "Elio"
-    },
-    {
-      "prompt": "Glordon wants to apologize to Caleb. Which approach fits his innocence best?",
-      "options": [
-        "Grand speech",
-        "Simple sincere line",
-        "Buy gifts",
-        "Avoid him"
-      ],
-      "correctIndex": 1,
-      "tags": ["apology", "glordon", "caleb"],
-      "enabled": true,
-      "weight": 1,
-      "hostPersonaName": "Elio"
-    },
-    {
-      "prompt": "Community vote: accept Grigon’s envoy for a monitored trial?",
-      "options": ["Yes, cautious", "No, hard line", "Abstain", "Delay"],
       "correctIndex": 0,
-      "tags": ["council", "grigon"],
+      "tags": ["auva", "humor", "manual", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Auva"
+    },
+    {
+      "prompt": "Ooooo needs to create a clone of Elio quickly. What's the priority consideration?",
+      "options": [
+        "Perfect physical accuracy",
+        "Behavioral patterns and memories",
+        "Speed over accuracy",
+        "Making it stronger than the original"
+      ],
+      "correctIndex": 1,
+      "tags": ["ooooo", "elio", "clone", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Ooooo"
+    },
+    {
+      "prompt": "Elio is offered official Communiverse ambassadorship at the end. Why does he decline?",
+      "options": [
+        "He's scared of the responsibility",
+        "He realizes Earth and family matter too - he'll return someday",
+        "The Communiverse rejected him",
+        "Olga forbids it"
+      ],
+      "correctIndex": 1,
+      "tags": ["elio", "olga", "growth", "family", "film"],
       "enabled": true,
       "weight": 1,
       "hostPersonaName": "Elio"
     },
     {
-      "prompt": "A newcomer feels unsafe in chat. Elio’s best first move?",
+      "prompt": "Glordon sees Elio wearing an eye patch after the radio fight. What's Glordon's most likely reaction?",
       "options": [
-        "Public call-out",
-        "Private check-in + mod log",
-        "Ignore",
-        "Instant ban the accuser"
+        "Mock him for being weak",
+        "Ask curiously if it hurts - show concern",
+        "Ignore it completely",
+        "Report it to authorities"
       ],
       "correctIndex": 1,
-      "tags": ["moderation", "care"],
+      "tags": ["glordon", "elio", "empathy", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Glordon"
+    },
+    {
+      "prompt": "Mira observes a heated debate in the Communiverse council. What's her strategic move?",
+      "options": [
+        "Join the loudest side",
+        "Wait and observe power dynamics before acting",
+        "Leave the council",
+        "Force an immediate vote"
+      ],
+      "correctIndex": 1,
+      "tags": ["mira", "strategy", "diplomacy", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Mira"
+    },
+    {
+      "prompt": "The wormhole highway has unexpected traffic. Caleb's response?",
+      "options": [
+        "Take a risky shortcut",
+        "Wait patiently following protocols",
+        "Complain loudly about Elio's route choice",
+        "Panic and abandon the mission"
+      ],
+      "correctIndex": 1,
+      "tags": ["caleb", "safety", "discipline", "rp"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Caleb"
+    },
+    {
+      "prompt": "Olga discovers the Elio clone has no eye under the patch. How does she confirm it's fake?",
+      "options": [
+        "Ask it direct questions",
+        "Check physical evidence (hair sample behavior)",
+        "Trust her instincts immediately",
+        "Ignore the suspicions"
+      ],
+      "correctIndex": 1,
+      "tags": ["olga", "clone", "investigation", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Olga"
+    },
+    {
+      "prompt": "Grigon rips open Glordon's battle armor to save his dying son. What does this moment reveal?",
+      "options": [
+        "Grigon is weak",
+        "Love matters more to Grigon than warrior tradition",
+        "The armor was defective",
+        "Grigon made a mistake"
+      ],
+      "correctIndex": 1,
+      "tags": ["grigon", "glordon", "redemption", "love", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Grigon"
+    },
+    {
+      "prompt": "Questa senses deep loneliness in Elio's mind. What does she tell him as he returns to Earth?",
+      "options": [
+        "Good luck on your own",
+        "You are never alone",
+        "Forget about the Communiverse",
+        "Come back immediately"
+      ],
+      "correctIndex": 1,
+      "tags": ["questa", "elio", "empathy", "connection", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Questa"
+    },
+    {
+      "prompt": "In the mid-credits scene, Elio and Bryce use the ham radio to contact Glordon. What does this show?",
+      "options": [
+        "Technology is unreliable",
+        "Their friendship continues across galaxies",
+        "Glordon returned to Earth",
+        "The Communiverse was destroyed"
+      ],
+      "correctIndex": 1,
+      "tags": ["elio", "bryce", "glordon", "friendship", "film"],
       "enabled": true,
       "weight": 1,
       "hostPersonaName": "Elio"
+    },
+    {
+      "prompt": "Elio gives Caleb a five-star rating after a dangerous rescue mission. Caleb's reaction?",
+      "options": [
+        "Celebrate enthusiastically",
+        "Deadpan: 'Five stars? I was trying to keep us ALIVE!'",
+        "Demand a pay raise",
+        "Quit immediately"
+      ],
+      "correctIndex": 1,
+      "tags": ["caleb", "elio", "humor", "ratings", "rp"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Caleb"
+    },
+    {
+      "prompt": "Auva promotes positive vibes during a tense Communiverse crisis. Best response?",
+      "options": [
+        "Tell her to be more serious",
+        "Appreciate her optimism - it helps morale",
+        "Ignore her completely",
+        "Ask her to leave"
+      ],
+      "correctIndex": 1,
+      "tags": ["auva", "optimism", "crisis", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Auva"
+    },
+    {
+      "prompt": "Ambassador Helix begins telling a very long story during an urgent Communiverse meeting. What should you do?",
+      "options": [
+        "Interrupt him rudely",
+        "Listen politely but gently redirect to the urgent matter",
+        "Walk out of the meeting",
+        "Encourage him to tell even more stories"
+      ],
+      "correctIndex": 1,
+      "tags": ["helix", "diplomacy", "storytelling", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Helix"
+    },
+    {
+      "prompt": "Helix offers to host a grand celebration for a new ambassador's arrival. How do you respond?",
+      "options": [
+        "Decline - celebrations are unnecessary",
+        "Accept graciously - it's his welcoming nature",
+        "Ask someone else to host instead",
+        "Suggest a quiet meeting instead"
+      ],
+      "correctIndex": 1,
+      "tags": ["helix", "celebration", "welcoming", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Helix"
+    },
+    {
+      "prompt": "Ambassador Tegmen states that a proposal is illogical and provides three rational objections. Best approach?",
+      "options": [
+        "Dismiss his logic and rely on emotions",
+        "Address his points with facts and reason",
+        "Ignore him and proceed anyway",
+        "Get angry at his bluntness"
+      ],
+      "correctIndex": 1,
+      "tags": ["tegmen", "logic", "rational", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Tegmen"
+    },
+    {
+      "prompt": "Tegmen and Helix are in a heated debate - logic vs. storytelling. How do you mediate?",
+      "options": [
+        "Side with Tegmen's logic only",
+        "Acknowledge both perspectives have value",
+        "Side with Helix's experience only",
+        "Tell them both to be quiet"
+      ],
+      "correctIndex": 1,
+      "tags": ["tegmen", "helix", "diplomacy", "balance", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Tegmen"
+    },
+    {
+      "prompt": "Ambassador Turais panics about a minor scheduling conflict. What calms her down?",
+      "options": [
+        "Tell her to stop overreacting",
+        "Calmly explain the simple solution and reassure her",
+        "Panic with her",
+        "Leave her to figure it out alone"
+      ],
+      "correctIndex": 1,
+      "tags": ["turais", "anxiety", "reassurance", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Turais"
+    },
+    {
+      "prompt": "During a crisis, Turais asks 'Should we evacuate? Is this safe?' multiple times. Best response?",
+      "options": [
+        "Ignore her questions",
+        "Provide clear, factual reassurance about safety measures",
+        "Tell her to be quiet",
+        "Agree that everyone should panic"
+      ],
+      "correctIndex": 1,
+      "tags": ["turais", "crisis", "safety", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Turais"
+    },
+    {
+      "prompt": "Ambassador Naos offers to help translate a complex alien language that no one else understands. How do you respond?",
+      "options": [
+        "Refuse her help",
+        "Gratefully accept - her omnilingualism is invaluable",
+        "Try to figure it out yourself instead",
+        "Ask someone less qualified to help"
+      ],
+      "correctIndex": 1,
+      "tags": ["naos", "omnilingualism", "communication", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Naos"
+    },
+    {
+      "prompt": "Two ambassadors are arguing in different languages. Naos understands both. What should she do?",
+      "options": [
+        "Stay silent and let them argue",
+        "Bridge the communication gap and help them understand each other",
+        "Pick a side",
+        "Leave the room"
+      ],
+      "correctIndex": 1,
+      "tags": ["naos", "mediation", "languages", "communiverse"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Naos"
+    },
+    {
+      "prompt": "Gunther Melmac insists he detected alien signals that match Communiverse frequencies. How does the team respond?",
+      "options": [
+        "Dismiss him as crazy",
+        "Take him seriously - he's been right before",
+        "Laugh at his theories",
+        "Ignore the signals completely"
+      ],
+      "correctIndex": 1,
+      "tags": ["gunther", "vindication", "ham-radio", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Gunther"
+    },
+    {
+      "prompt": "Gunther wants to teach the Masters of Ham group about the Drake equation. What's the best approach?",
+      "options": [
+        "Tell him it's too complicated",
+        "Encourage his passion for teaching about alien life",
+        "Ask him to teach something else",
+        "Discourage the whole group"
+      ],
+      "correctIndex": 1,
+      "tags": ["gunther", "teaching", "passion", "film"],
+      "enabled": true,
+      "weight": 1,
+      "hostPersonaName": "Gunther"
     }
   ]
 }

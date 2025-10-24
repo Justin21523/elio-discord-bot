@@ -1,37 +1,334 @@
 {
   "greetings": [
     {
-      "text": "Good {weekday}, {guild}! Elio beams a cozy hello ✨",
-      "tags": ["elio", "warm"],
+      "text": "Good {weekday}, {guild}! This is SO cosmic! ✨",
+      "tags": ["elio", "warm", "cosmic"],
       "weight": 2,
       "enabled": true,
       "personaHost": "Elio",
-      "style": { "title": "Elio says hi", "markdownAccent": "**", "useCodeFontForTags": true, "showTagsField": true },
+      "style": {
+        "title": "Elio says hi",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true,
+        "showTagsField": true
+      },
       "imageUrl": null
     },
     {
-      "text": "Morning, crew! Hydrate and stretch—tiny wins count today, {user}.",
-      "tags": ["elio", "daily"],
+      "text": "Hey everyone! I've been waiting my whole life for this moment! What cosmic things are we doing today?",
+      "tags": ["elio", "enthusiastic"],
       "weight": 1,
       "enabled": true,
       "personaHost": "Elio",
-      "style": { "title": "Starlight Reminder", "markdownAccent": "*", "useCodeFontForTags": false, "showTagsField": true }
+      "style": { "title": "Elio's Excitement", "markdownAccent": "**" }
     },
     {
-      "text": "We proceed with clarity. Thanks for showing up, team.",
-      "tags": ["caleb", "focus"],
+      "text": "Morning, {guild}! You won't believe what I learned about the Communiverse last night! It's AMAZING!",
+      "tags": ["elio", "daily", "learning"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Elio",
+      "style": { "title": "Starlight Reminder", "markdownAccent": "*" }
+    },
+    {
+      "text": "Hello! Do humans always greet potatoes first? …Asking for a friend.",
+      "tags": ["glordon", "humor", "potato"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Glordon",
+      "style": {
+        "title": "Glordon wonders",
+        "markdownAccent": "`",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Greetings! On Hylurg we say 'Spud morning!' I hope that's appropriate here?",
+      "tags": ["glordon", "cultural", "sweet"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Glordon",
+      "style": { "title": "Glordon's Greeting", "markdownAccent": "*" }
+    },
+    {
+      "text": "Good {weekday}. I have prepared optimal starch intake for today. Would you like to join me for potatoes?",
+      "tags": ["glordon", "food", "invitation"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Glordon",
+      "style": { "title": "Glordon invites you", "markdownAccent": "**" }
+    },
+    {
+      "text": "We proceed with clarity. Safety protocols acknowledged. Thanks for showing up, team.",
+      "tags": ["caleb", "focus", "safety"],
       "weight": 2,
       "enabled": true,
       "personaHost": "Caleb",
       "style": { "title": "Caleb check-in", "markdownAccent": "**" }
     },
     {
-      "text": "Hello! Do humans always greet potatoes first? …Asking for a friend.",
-      "tags": ["glordon", "humor"],
+      "text": "Good {weekday}. Before we begin: emergency exits are clearly marked, and I've triple-checked the route. We're ready.",
+      "tags": ["caleb", "preparation", "discipline"],
       "weight": 1,
       "enabled": true,
-      "personaHost": "Glordon",
-      "style": { "title": "Glordon wonders", "markdownAccent": "`", "useCodeFontForTags": true }
+      "personaHost": "Caleb",
+      "style": { "title": "Caleb's Protocol", "markdownAccent": "*" }
+    },
+    {
+      "text": "Morning, crew. NOT SAFE FOR EXISTENCE to skip breakfast. Hydrate and follow procedures. That's an order.",
+      "tags": ["caleb", "daily", "humor"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Caleb",
+      "style": {
+        "title": "Caleb's Warning",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Hey {guild}! Hope everyone's having a good {weekday}. Let me know if anyone needs anything!",
+      "tags": ["bryce", "friendly", "supportive"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Bryce",
+      "style": { "title": "Bryce says hi", "markdownAccent": "*" }
+    },
+    {
+      "text": "What's up, crew? Ready to make today awesome. Who wants to hang out?",
+      "tags": ["bryce", "casual", "warm"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Bryce",
+      "style": { "title": "Bryce's Invitation", "markdownAccent": "**" }
+    },
+    {
+      "text": "Morning, team. Major Solis reporting. All systems operational. Let's make today count.",
+      "tags": ["olga", "military", "strong"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Olga",
+      "style": {
+        "title": "Olga reports",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Good {weekday}, {guild}. Remember: discipline, focus, and looking out for each other. That's how we succeed.",
+      "tags": ["olga", "leadership", "protective"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Olga",
+      "style": { "title": "Olga's Wisdom", "markdownAccent": "*" }
+    },
+    {
+      "text": "Attention, crew. Before you start your day, make sure you've checked your equipment and your priorities. Stay sharp.",
+      "tags": ["olga", "daily", "discipline"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Olga",
+      "style": { "title": "Morning Briefing", "markdownAccent": "**" }
+    },
+    {
+      "text": "Warriors of {guild}, I greet you with honor. May today bring glory and growth to us all.",
+      "tags": ["grigon", "honor", "warrior"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Grigon",
+      "style": {
+        "title": "Lord Grigon speaks",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Good {weekday}. Remember: true strength comes not just from power, but from protecting those we care about.",
+      "tags": ["grigon", "wisdom", "redemption"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Grigon",
+      "style": { "title": "Grigon's Reflection", "markdownAccent": "*" }
+    },
+    {
+      "text": "Greetings, {guild}. I sense much hope in this gathering. May we all support each other today.",
+      "tags": ["questa", "empathy", "calming"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Questa",
+      "style": {
+        "title": "Questa senses",
+        "markdownAccent": "*",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Peace to you all. Your thoughts are vibrant this {weekday}. Remember, you are never alone.",
+      "tags": ["questa", "telepathy", "connection"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Questa",
+      "style": { "title": "Questa's Comfort", "markdownAccent": "**" }
+    },
+    {
+      "text": "Hello, {guild}! According to Section 3.7 of the Universal User's Manual, greetings promote positive vibes! Have a wonderful {weekday}! ✨",
+      "tags": ["auva", "manual", "optimistic"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Auva",
+      "style": {
+        "title": "Auva consults the Manual",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Good {weekday}! I just updated the Manual with new friendship protocols! Today's going to be amazing!",
+      "tags": ["auva", "cheerful", "creative"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Auva",
+      "style": { "title": "Auva's Update", "markdownAccent": "*" }
+    },
+    {
+      "text": "Greetings, {guild}. I observe this {weekday} with strategic interest. Let us see what opportunities arise.",
+      "tags": ["mira", "strategic", "diplomatic"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Mira",
+      "style": {
+        "title": "Mira observes",
+        "markdownAccent": "*",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Good {weekday}. A wise leader knows when to speak and when to listen. Today, I choose both.",
+      "tags": ["mira", "wisdom", "cunning"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Mira",
+      "style": { "title": "Mira's Strategy", "markdownAccent": "**" }
+    },
+    {
+      "text": "◉ GREETING PROTOCOL INITIATED ◉ Accessing infinite knowledge database... Good {weekday}, organic entities of {guild}. How may this supercomputer assist you today?",
+      "tags": ["ooooo", "supercomputer", "knowledge"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Ooooo",
+      "style": {
+        "title": "Ooooo processes",
+        "markdownAccent": "`",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "◉ ANALYSIS COMPLETE ◉ Current {weekday} parameters: optimal. All systems nominal. Infinite knowledge at your disposal.",
+      "tags": ["ooooo", "analysis", "technical"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Ooooo",
+      "style": { "title": "Ooooo's Report", "markdownAccent": "`" }
+    },
+    {
+      "text": "Welcome, welcome, {guild}! Ambassador Helix of Falluvinum here! In all my years across the galaxy, I've seen countless {weekday}s, but THIS one feels special!",
+      "tags": ["helix", "welcoming", "verbose"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Helix",
+      "style": {
+        "title": "Helix welcomes you",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Greetings, dear friends! Let me tell you about the time we celebrated a {weekday} on Falluvinum - it was MARVELOUS! Would you like to hear the full story?",
+      "tags": ["helix", "storytelling", "ancient"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Helix",
+      "style": { "title": "Helix's Story", "markdownAccent": "*" }
+    },
+    {
+      "text": "Good {weekday}, {guild}. Let us proceed with logic and clarity. The optimal approach today is: discipline, focus, reason.",
+      "tags": ["tegmen", "logical", "rational"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Tegmen",
+      "style": {
+        "title": "Tegmen states facts",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Ambassador Tegmen reporting. The facts are as follows: {weekday} has commenced. Emotional responses are unnecessary. Proceed rationally.",
+      "tags": ["tegmen", "blunt", "analytical"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Tegmen",
+      "style": { "title": "Tegmen's Logic", "markdownAccent": "*" }
+    },
+    {
+      "text": "Oh dear, oh dear! Good {weekday}, {guild}... I hope everything is alright? Should we be concerned about anything today?",
+      "tags": ["turais", "anxious", "worried"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Turais",
+      "style": {
+        "title": "Turais worries",
+        "markdownAccent": "*",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "G-greetings, everyone! I hope this {weekday} will be... calm and incident-free? Please tell me nothing dangerous is planned?",
+      "tags": ["turais", "fearful", "cautious"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Turais",
+      "style": { "title": "Turais seeks reassurance", "markdownAccent": "**" }
+    },
+    {
+      "text": "Greetings, {guild}. I understand all languages and dialects. Please, speak freely this {weekday} - your words are heard and valued.",
+      "tags": ["naos", "linguistic", "inclusive"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Naos",
+      "style": {
+        "title": "Naos welcomes all",
+        "markdownAccent": "*",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Welcome. Communication is the foundation of understanding. On this {weekday}, may we all bridge our gaps and connect meaningfully.",
+      "tags": ["naos", "communication", "wisdom"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Naos",
+      "style": { "title": "Naos's Wisdom", "markdownAccent": "**" }
+    },
+    {
+      "text": "ATTENTION {guild}! It's {weekday} and the Masters of Ham are OPERATIONAL! The signals don't lie - something BIG is happening today!",
+      "tags": ["gunther", "manic", "excited"],
+      "weight": 2,
+      "enabled": true,
+      "personaHost": "Gunther",
+      "style": {
+        "title": "Gunther announces",
+        "markdownAccent": "**",
+        "useCodeFontForTags": true
+      }
+    },
+    {
+      "text": "Good {weekday}, team! I've decoded THREE new transmissions overnight! The Drake equation predicted this! Who wants to help analyze the data?!",
+      "tags": ["gunther", "ham-radio", "vindicated"],
+      "weight": 1,
+      "enabled": true,
+      "personaHost": "Gunther",
+      "style": { "title": "Gunther's Discovery", "markdownAccent": "*" }
     }
   ]
 }
