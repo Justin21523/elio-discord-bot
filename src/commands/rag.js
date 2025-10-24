@@ -91,38 +91,68 @@ export async function execute(interaction) {
     } else if (subcommand === "search") {
       const query = interaction.options.getString("query");
 
-      const result = await search(query, {
-        guildId: interaction.guildId,
-        topK: 3,
-      });
+      // Send progress update after 5 seconds
+      const progressTimeout = setTimeout(async () => {
+        try {
+          await interaction.editReply("🔍 Searching knowledge base...");
+        } catch (e) {
+          // Ignore if already replied
+        }
+      }, 5000);
 
-      if (!result.ok) {
-        if (result.error.code === "RAG_EMPTY") {
-          await sendSuccessReply(interaction, {
-            title: "🔍 Search Results",
-            description: "No relevant documents found for your query.",
-          });
+      try {
+        const result = await search({
+          query,
+          guildId: interaction.guildId,
+          topK: 5,
+          generateAnswer: true,
+        });
+
+        clearTimeout(progressTimeout);
+
+        if (!result.ok) {
+          if (result.error.code === "RAG_EMPTY") {
+            await sendSuccessReply(interaction, {
+              title: "🔍 Search Results",
+              description: "No relevant documents found for your query.",
+            });
+            return;
+          }
+          await sendErrorReply(interaction, result.error);
           return;
         }
-        await sendErrorReply(interaction, result.error);
-        return;
+
+        const { hits, answer, totalHits } = result.data;
+
+        // Build answer section
+        let description = "";
+        if (answer) {
+          description += `**🤖 AI Answer:**\n${answer}\n\n`;
+        }
+
+        // Build sources section
+        if (hits && hits.length > 0) {
+          description += `**📚 Sources (${totalHits}):**\n`;
+          description += hits
+            .slice(0, 3)
+            .map((doc, i) => {
+              const preview = doc.chunk.substring(0, 120);
+              const score = (doc.score * 100).toFixed(1);
+              return `${i + 1}. (${score}%) ${preview}${
+                doc.chunk.length > 120 ? "..." : ""
+              }`;
+            })
+          .join("\n\n");
+        }
+
+        await sendSuccessReply(interaction, {
+          title: `🔍 RAG Search: "${query}"`,
+          description: description || "No results found.",
+        });
+      } catch (error) {
+        clearTimeout(progressTimeout);
+        throw error;
       }
-
-      const docs = result.data;
-      const description = docs
-        .map((doc, i) => {
-          const preview = doc.content.substring(0, 150);
-          const score = (doc.score * 100).toFixed(1);
-          return `**${i + 1}.** (${score}% match)\n${preview}${
-            doc.content.length > 150 ? "..." : ""
-          }`;
-        })
-        .join("\n\n");
-
-      await sendSuccessReply(interaction, {
-        title: `🔍 Search Results (${docs.length})`,
-        description,
-      });
     } else if (subcommand === "clear") {
       const confirm = interaction.options.getString("confirm");
 

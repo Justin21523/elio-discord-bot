@@ -3,17 +3,28 @@
  * User profile command handler.
  */
 
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { ErrorCodes as ErrorCode } from "../config.js";
+import { getProfile } from "../services/points.js";
 import { logger } from "../util/logger.js";
-import { ErrorCode } from "../config.js";
-import { getProfile } from "../services/pointsService.js";
+
+export const data = new SlashCommandBuilder()
+  .setName("profile")
+  .setDescription("View a user's profile")
+  .addUserOption((opt) =>
+    opt
+      .setName("user")
+      .setDescription("User to view (defaults to yourself)")
+      .setRequired(false)
+  );
 
 /**
  * Handle /profile command
  * @param {ChatInputCommandInteraction} interaction
  * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
  */
-export default async function handleProfile(interaction) {
+export async function execute(interaction) {
+  await interaction.deferReply();
   try {
     const guildId = interaction.guildId;
     const targetUser = interaction.options.getUser("user") || interaction.user;
