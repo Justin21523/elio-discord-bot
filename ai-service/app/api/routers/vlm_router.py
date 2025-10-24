@@ -82,16 +82,20 @@ async def describe_image(
         )
 
 
+class ImageReactRequest(BaseModel):
+    image_url: HttpUrl
+    persona_name: str
+    context: Optional[str] = None
+
+
 @router.post("/imageReact")
 async def image_react(
-    image_url: HttpUrl,
-    persona_name: str,
-    context: Optional[str] = None,
+    request: ImageReactRequest,
     model_manager: ModelManager = Depends(get_model_manager)
 ):
     """Generate persona-specific image reaction"""
     try:
-        logger.info(f"[VLM] Image reaction for: {persona_name}")
+        logger.info(f"[VLM] Image reaction for: {request.persona_name}")
 
         vlm = await model_manager.get_vlm()
 
@@ -102,16 +106,16 @@ async def image_react(
             "Lord Grigon": "React gruffly but with hidden warmth",
         }
 
-        style = persona_styles.get(persona_name, "React naturally")
-        prompt = f"{style}. {context or ''}"
+        style = persona_styles.get(request.persona_name, "React naturally")
+        prompt = f"{style}. {request.context or ''}"
 
-        result = await vlm.describe_image(image_url=str(image_url), question=prompt)
+        result = await vlm.describe_image(image_url=str(request.image_url), question=prompt)
 
         return {
             "ok": True,
             "data": {
                 "reaction": result.get("text", ""),
-                "persona": persona_name,
+                "persona": request.persona_name,
                 "label": result.get("text", "")[:100],
                 "model": model_manager.vlm_model_name,
             },

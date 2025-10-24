@@ -137,24 +137,27 @@ class ModelManager:
                         bnb_4bit_use_double_quant=True,
                         bnb_4bit_quant_type="nf4",
                     )
-                    log_info("Using 4-bit quantization")
+                    model_kwargs["device_map"] = "auto"  # Required for quantization
+                    log_info("Using 4-bit quantization with device_map=auto")
                 elif settings.USE_8BIT:
                     model_kwargs["load_in_8bit"] = True
-                    log_info("Using 8-bit quantization")
+                    model_kwargs["device_map"] = "auto"  # Required for quantization
+                    log_info("Using 8-bit quantization with device_map=auto")
                 else:
                     model_kwargs["torch_dtype"] = torch.float16
 
             # Load model
-            if model_type == "vlm":
-                # VLM models might need special handling
+            if model_type == "vlm" or model_type == "embeddings":
+                # VLM and embedding models use AutoModel
                 from transformers import AutoModel
 
                 model = AutoModel.from_pretrained(model_id, **model_kwargs)
             else:
+                # LLM models use AutoModelForCausalLM
                 model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
 
-            # Move to device if not quantized
-            if not (settings.USE_8BIT or settings.USE_4BIT):
+            # Move to device if not quantized (quantized models use device_map)
+            if not (settings.USE_8BIT or settings.USE_4BIT) and "device_map" not in model_kwargs:
                 model = model.to(self.device) # type: ignore
 
             # Set to eval mode
