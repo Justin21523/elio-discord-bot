@@ -1,6 +1,9 @@
 /**
- * scripts/deploy-commands.js
- * Deploy slash commands to Discord (guild-scoped for development).
+ * scripts/deploy-commands-global.js
+ * Deploy slash commands GLOBALLY (to all servers).
+ * Use this for production deployment.
+ *
+ * NOTE: Global commands take ~1 hour to propagate across all Discord servers.
  */
 
 import { REST, Routes } from "discord.js";
@@ -277,44 +280,16 @@ const commands = [
         type: 1, // SUB_COMMAND
         name: "start",
         description: "Start a new scenario quiz",
-        options: [
-          {
-            type: 4, // INTEGER
-            name: "reveal-after",
-            description: "Minutes until reveal (default: 3)",
-            required: false,
-            min_value: 1,
-            max_value: 30,
-          },
-        ],
-      },
-      {
-        type: 1, // SUB_COMMAND
-        name: "cancel",
-        description: "Cancel active scenario in this channel",
       },
       {
         type: 1, // SUB_COMMAND
         name: "reveal",
-        description: "Reveal scenario results early",
+        description: "Reveal scenario results",
         options: [
           {
             type: 3, // STRING
-            name: "session-id",
-            description: "Session ID to reveal",
-            required: true,
-          },
-        ],
-      },
-      {
-        type: 1, // SUB_COMMAND
-        name: "stats",
-        description: "View scenario session statistics",
-        options: [
-          {
-            type: 3, // STRING
-            name: "session-id",
-            description: "Session ID to view",
+            name: "session_id",
+            description: "Session ID (from scenario message)",
             required: true,
           },
         ],
@@ -532,29 +507,23 @@ const rest = new REST({ version: "10" }).setToken(config.discord.token);
 
 (async () => {
   try {
-    console.log("Started refreshing application (/) commands.");
+    console.log("\n========================================");
+    console.log("🌍 DEPLOYING COMMANDS GLOBALLY");
+    console.log("========================================\n");
+    console.log("⚠️  WARNING: Global commands take ~1 hour to propagate!");
+    console.log("⚠️  Use deploy-commands.js for instant guild-scoped testing.\n");
 
-    // Guild-scoped deployment for development
-    if (config.discord.guildIdDev) {
-      await rest.put(
-        Routes.applicationGuildCommands(
-          config.discord.appId,
-          config.discord.guildIdDev
-        ),
-        { body: commands }
-      );
-      console.log(
-        `Successfully registered commands to guild ${config.discord.guildIdDev}`
-      );
-    } else {
-      // Global deployment (takes ~1 hour to propagate)
-      await rest.put(Routes.applicationCommands(config.discord.appId), {
-        body: commands,
-      });
-      console.log("Successfully registered commands globally");
-    }
+    // FORCE global deployment (ignoring GUILD_ID_DEV)
+    await rest.put(Routes.applicationCommands(config.discord.appId), {
+      body: commands,
+    });
+
+    console.log("✅ Successfully registered commands GLOBALLY");
+    console.log(`📋 Total commands registered: ${commands.length}`);
+    console.log("\n🕐 Please wait up to 1 hour for commands to appear in all servers.");
+    console.log("========================================\n");
   } catch (error) {
-    console.error("Failed to deploy commands:", error);
+    console.error("❌ Failed to deploy commands:", error);
     process.exit(1);
   }
 })();

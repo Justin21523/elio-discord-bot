@@ -5,7 +5,7 @@ import { MongoClient } from 'mongodb';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { CONFIG } from '../src/config.js';
+import { config } from '../src/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,11 +18,11 @@ async function runNode(scriptRelPath) {
 }
 
 async function wipeDb() {
-  const client = new MongoClient(CONFIG.MONGODB_URI);
+  const client = new MongoClient(config.MONGODB_URI);
   await client.connect();
-  const db = client.db(CONFIG.DB_NAME);
+  const db = client.db(config.DB_NAME);
   try {
-    console.log(`[JOB] Nuking DB=${CONFIG.DB_NAME} ...`);
+    console.log(`[JOB] Nuking DB=${config.DB_NAME} ...`);
     try {
       const res = await db.dropDatabase();
       console.log('[JOB] dropDatabase result:', res);
@@ -50,7 +50,7 @@ async function wipeDb() {
 }
 
 async function main() {
-  if (!CONFIG.MONGODB_URI || !CONFIG.DB_NAME) {
+  if (!config.MONGODB_URI || !config.DB_NAME) {
     console.error('Missing MONGODB_URI / DB_NAME in config/env');
     process.exit(1);
   }

@@ -1,12 +1,12 @@
 /**
- * Seed Data Script
- * Populates initial data for testing
+ * scripts/seed-data.js
+ * Seed Data Script - Populates initial data for testing
  * Run with: node scripts/seed-data.js
  */
 
-import mongo from "../src/db/mongo.js";
+import { fileURLToPath } from "node:url";
+import { connectMongo, closeMongo, collections } from "../src/db/mongo.js";
 import mediaRepo from "../src/services/mediaRepo.js";
-import { logger } from "../src/util/logger.js";
 
 // Sample media data for seeding
 const SAMPLE_MEDIA = [
@@ -46,7 +46,6 @@ const SAMPLE_MEDIA = [
     nsfw: false,
     enabled: true,
   },
-  // Add more as needed
 ];
 
 // Sample personas for future use
@@ -157,7 +156,6 @@ async function seedMedia() {
 async function seedPersonas() {
   console.log("\n👥 Seeding personas collection...");
 
-  const { collections } = mongo.getState();
   let successCount = 0;
   let errorCount = 0;
 
@@ -198,8 +196,6 @@ async function seedPersonas() {
 async function seedGreetings() {
   console.log("\n👋 Seeding greetings collection...");
 
-  const { collections } = mongo.getState();
-
   try {
     // Clear existing greetings
     await collections.greetings.deleteMany({});
@@ -215,7 +211,7 @@ async function seedGreetings() {
 /**
  * Main seeding function
  */
-async function seed() {
+async function main() {
   console.log("═══════════════════════════════════════");
   console.log("  Communiverse Bot - Database Seeder   ");
   console.log("═══════════════════════════════════════");
@@ -223,7 +219,7 @@ async function seed() {
   try {
     // Connect to database
     console.log("\n🔌 Connecting to database...");
-    await mongo.connect();
+    await connectMongo();
     console.log("  ✅ Database connected");
 
     // Run seeders
@@ -233,7 +229,6 @@ async function seed() {
 
     // Show statistics
     console.log("\n📊 Database Statistics:");
-    const { collections } = mongo.getState();
 
     const stats = await Promise.all([
       collections.media.countDocuments({ enabled: true }),
@@ -254,18 +249,20 @@ async function seed() {
     console.log("  1. Make sure your .env file is configured");
     console.log("  2. Run: npm run deploy-commands");
     console.log("  3. Run: npm start");
+
+    process.exit(0);
   } catch (error) {
-    console.error("\n❌ Seeding failed:", error);
+    console.error("\n❌ Seeding failed:", error.message);
+    console.error(error);
     process.exit(1);
   } finally {
-    await mongo.close();
-    process.exit(0);
+    await closeMongo();
   }
 }
 
-// Check if running directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  seed();
+// Run if called directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
 }
 
-export default seed;
+export default main;
