@@ -39,7 +39,7 @@ export async function meet({ guildId, channelId, persona }) {
     const pdoc = await getPersonaDoc(personaKey);
 
     // Load config (to preserve your tone/cooldowns/colors fallback)
-    const cfgRes = await getConfig({ guildId, persona });
+    const cfgRes = await getPersonaConfig({ guildId, persona });
     if (!cfgRes.ok) return cfgRes;
     const cfg = cfgRes.data.config;
 
@@ -50,8 +50,8 @@ export async function meet({ guildId, channelId, persona }) {
     const { personaSay } = await import("./webhooks.js");
     const sayRes = await personaSay(
       channelId,
-      // merge persona identity for webhook
-      { name: pdoc?.name || personaKey, avatar: pdoc?.avatar, color: pdoc?.color ?? cfg.color },
+      // merge persona identity for webhook (use avatarUrl from DB)
+      { name: pdoc?.name || personaKey, avatar: pdoc?.avatarUrl || pdoc?.avatar, color: pdoc?.color ?? cfg.color },
       opener,
       { color: pdoc?.color ?? cfg.color, language: cfg.language }
     );
@@ -62,7 +62,7 @@ export async function meet({ guildId, channelId, persona }) {
       said: true,
       persona: {
         name: pdoc?.name || personaKey,
-        avatar: pdoc?.avatar || null,
+        avatar: pdoc?.avatarUrl || pdoc?.avatar || null,
         color: pdoc?.color ?? cfg.color
       },
       opener
@@ -86,7 +86,7 @@ export async function act({ guildId, userId, persona, action }) {
     }
 
     // Config for multipliers (kept)
-    const cfgRes = await getConfig({ guildId, persona });
+    const cfgRes = await getPersonaConfig({ guildId, persona });
     if (!cfgRes.ok) return cfgRes;
     const multiplier = cfgRes.data.config.multipliers?.[action] ?? 1.0;
 
@@ -121,7 +121,7 @@ export async function act({ guildId, userId, persona, action }) {
     return ok({
       delta,
       profile: decorate(updated),
-      persona: { name: pdoc?.name || personaId, avatar: pdoc?.avatar || null, color: pdoc?.color ?? cfgRes.data.config.color }
+      persona: { name: pdoc?.name || personaId, avatar: pdoc?.avatarUrl || pdoc?.avatar || null, color: pdoc?.color ?? cfgRes.data.config.color }
     });
   } catch (cause) {
     logError(cause, { guildId, userId, persona, action });
@@ -131,7 +131,7 @@ export async function act({ guildId, userId, persona, action }) {
 
 
 /** Get config (with defaults merged). */
-export async function getConfig({ guildId, persona }) {
+export async function getPersonaConfig({ guildId, persona }) {
   try {
     const key = { guildId, persona: persona?.id || persona?.name || "default" };
     const doc = await withCollection("persona_config", (col) => col.findOne(key));
@@ -143,7 +143,7 @@ export async function getConfig({ guildId, persona }) {
 }
 
 /** Patch config (admin). */
-export async function setConfig({ guildId, persona, patch }) {
+export async function setPersonaConfig({ guildId, persona, patch }) {
   try {
     const key = { guildId, persona: persona?.id || persona?.name || "default" };
     const now = new Date();
@@ -155,6 +155,52 @@ export async function setConfig({ guildId, persona, patch }) {
     return ok({ config: merged });
   } catch (cause) {
     return err("DB_ERROR", "Set persona config failed", cause);
+  }
+}
+
+/** Get guild-level persona config (for command compatibility) */
+export async function getConfig(guildId) {
+  try {
+    const doc = await withCollection("guild_config", (col) => col.findOne({ guildId }));
+    const config = {
+      cooldownSec: doc?.persona?.cooldownSec || 30,
+      keywordTriggersEnabled: doc?.keywordTriggersEnabled !== false,
+      memoryOptIn: doc?.persona?.memoryOptIn || false,
+      multipliers: doc?.persona?.multipliers || { meet: 1.0, help: 1.2, gift: 1.5 }
+    };
+    return ok(config);
+  } catch (cause) {
+    return err("DB_ERROR", "Get guild config failed", cause);
+  }
+}
+
+/** Set guild-level persona config (for command compatibility) */
+export async function setConfig(guildId, updates) {
+  try {
+    const now = new Date();
+    const setFields = {};
+
+    // Map updates to nested structure
+    Object.keys(updates).forEach(key => {
+      if (key === 'keywordTriggersEnabled') {
+        setFields[key] = updates[key];
+      } else {
+        setFields[`persona.${key}`] = updates[key];
+      }
+    });
+
+    await withCollection("guild_config", (col) =>
+      col.updateOne(
+        { guildId },
+        { $set: { ...setFields, updatedAt: now }, $setOnInsert: { createdAt: now } },
+        { upsert: true }
+      )
+    );
+
+    incCounter("commands_total", { command: "guild.setConfig" });
+    return ok({ updated: Object.keys(updates).length });
+  } catch (cause) {
+    return err("DB_ERROR", "Set guild config failed", cause);
   }
 }
 
@@ -229,7 +275,7 @@ async function getAndBumpCooldown({ guildId, userId, persona, action }) {
   };
   const now = Date.now();
 
-  const cfgRes = await getConfig({ guildId, persona });
+  const cfgRes = await getPersonaConfig({ guildId, persona });
   if (!cfgRes.ok) return cfgRes;
   const cdSec = (cfgRes.data.config.cooldownSec?.[action] ?? DEFAULT_CONFIG.cooldownSec[action]) || 0;
 
@@ -245,3 +291,85 @@ async function getAndBumpCooldown({ guildId, userId, persona, action }) {
   );
   return ok({ cooldownActive: false, secondsLeft: 0 });
 }
+
+// ---------- Command Adapters (for persona command compatibility) ----------
+
+/** Get a single persona by name from the catalog */
+export async function getPersona(name) {
+  try {
+    const doc = await withCollection("personas", (col) =>
+      col.findOne({ name, enabled: { $ne: false } })
+    );
+    if (!doc) {
+      return err("NOT_FOUND", `Persona "${name}" not found`);
+    }
+    return ok(doc);
+  } catch (cause) {
+    return err("DB_ERROR", "Failed to get persona", cause);
+  }
+}
+
+/** List all enabled personas */
+export async function listPersonas() {
+  try {
+    const docs = await withCollection("personas", (col) =>
+      col.find({ enabled: { $ne: false } }).toArray()
+    );
+    return ok(docs);
+  } catch (cause) {
+    return err("DB_ERROR", "Failed to list personas", cause);
+  }
+}
+
+/** Apply affinity delta (adapter for command usage) */
+export async function affinityDelta({ guildId, userId, personaId, delta, action }) {
+  try {
+    const personaKey = personaId || "default";
+
+    // Apply delta atomically
+    const updated = await withCollection("persona_affinity", async (col) => {
+      await col.updateOne(
+        { guildId, userId, persona: personaKey },
+        {
+          $setOnInsert: {
+            guildId,
+            userId,
+            persona: personaKey,
+            friendship: 0,
+            trust: 0,
+            dependence: 0,
+            createdAt: new Date()
+          },
+          $inc: {
+            friendship: delta.friendship || 0,
+            trust: delta.trust || 0,
+            dependence: delta.dependence || 0
+          },
+          $set: { updatedAt: new Date(), lastAction: action },
+        },
+        { upsert: true }
+      );
+      return col.findOne({ guildId, userId, persona: personaKey });
+    });
+
+    incCounter("persona_affinity_total", { action });
+    return ok(decorate(updated));
+  } catch (cause) {
+    logError(cause, { guildId, userId, personaId, action });
+    return err("DB_ERROR", "Affinity delta failed", cause);
+  }
+}
+
+// Default export for backward compatibility
+export default {
+  meet,
+  act,
+  getConfig,
+  setConfig,
+  getPersonaConfig,
+  setPersonaConfig,
+  keywordTriggersEnabled,
+  getPersona,
+  listPersonas,
+  affinityDelta,
+};

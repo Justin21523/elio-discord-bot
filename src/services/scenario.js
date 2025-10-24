@@ -20,12 +20,33 @@ const DEFAULTS = {
   basePoints: 30,           // minimum for a correct answer (even at the last second)
   maxPoints: 100,           // max points for instant answer (correct and first millisecond)
   firstCorrectBonus: 25,    // extra bonus to the first correct user
+  revealAfterMinutes: 3,    // default time until auto-reveal (reduced from 5 to 3 minutes)
+  maxSessionAgeMinutes: 10, // maximum session lifetime before force cleanup
 };
 
-export async function startSession({ guildId, channelId, scenarioId = null, tag = null, mode = "quiz", aiFacade = null }) {
+export async function startSession({ guildId, channelId, scenarioId = null, tag = null, mode = "quiz", aiFacade = null, revealAfterMinutes = null, durationSec = null }) {
   const now = new Date();
   try {
-    // Ensure at most one active session
+    // FIRST: Auto-cleanup expired sessions in this channel (prevents stuck sessions)
+    await withCollection(SESSIONS, async (col) => {
+      const expiredSession = await col.findOne({
+        guildId,
+        channelId,
+        active: true,
+        revealAt: { $lt: now } // revealAt has passed
+      });
+
+      if (expiredSession) {
+        // Auto-reveal and deactivate expired session
+        await col.updateOne(
+          { _id: expiredSession._id },
+          { $set: { active: false, revealAt: now } }
+        );
+        incCounter("scenario_auto_cleanup_total");
+      }
+    });
+
+    // THEN: Check if there's still an active session (that hasn't expired)
     const exists = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId, active: true }));
     if (exists) return err("VALIDATION_FAILED", "An active session already exists in this channel.");
 
@@ -51,6 +72,13 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
     }
     if (options.length < 2) return err("VALIDATION_FAILED", "Scenario has insufficient options.");
 
+    // Calculate timing (use defaults if not provided)
+    const actualDurationSec = durationSec || DEFAULTS.durationSec;
+    const actualRevealMinutes = revealAfterMinutes ?? DEFAULTS.revealAfterMinutes;
+    const startedAt = now;
+    const expireAt = new Date(now.getTime() + actualDurationSec * 1000);
+    const revealAt = new Date(now.getTime() + (actualRevealMinutes * 60 * 1000));
+
     const doc = {
       guildId,
       channelId,
@@ -63,13 +91,13 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
       createdAt: now,
       startedAt,
       expireAt,
-      revealAt: null,
+      revealAt,
       winnerUserId: null,
       winnerScore: null,
       // meta
       hostPersonaName: scenario.hostPersonaName || null,
       tags: Array.isArray(scenario.tags) ? scenario.tags : [],
-      durationSec: Math.max(5, durationSec),
+      durationSec: Math.max(5, actualDurationSec),
       firstCorrectUserId: null
     };
 
@@ -83,6 +111,17 @@ export async function startSession({ guildId, channelId, scenarioId = null, tag 
     setGauge("active_games", activeCount, {});
 
     return ok({
+      sessionId: inserted._id.toString(),
+      scenario: {
+        _id: scenario._id,
+        question: scenario.prompt,
+        options,
+        correctIndex: doc.correctIndex,
+        hostPersonaName: doc.hostPersonaName,
+        tags: doc.tags
+      },
+      question: scenario.prompt,
+      revealAt: doc.revealAt,
       session: sanitize(inserted)
     });
   } catch (cause) {
@@ -113,9 +152,20 @@ export async function answer({ sessionId, userId, answerIndex = null, freeText =
       : (typeof freeText === "string" && normalize(freeText) === normalize(session.options[session.correctIndex]));
 
     // Insert answer (unique per user)
+    const answerDoc = {
+      sessionId: session._id,
+      guildId: session.guildId,
+      channelId: session.channelId,
+      userId,
+      index: answerIndex !== null ? Number(answerIndex) : null,
+      text: freeText || null,
+      correct,
+      createdAt: now
+    };
+
     const insRes = await withCollection(ANSWERS, async (col) => {
       try {
-        await col.insertOne({ sessionId: session._id, guildId, channelId, userId, index, text, correct, createdAt: now });
+        await col.insertOne(answerDoc);
         return "OK";
       } catch (e) {
         if (String(e).includes("E11000")) return "DUP";
@@ -148,7 +198,7 @@ export async function answer({ sessionId, userId, answerIndex = null, freeText =
 
       // Award points
       await Points.award({
-        guildId,
+        guildId: session.guildId,
         userId,
         amount: scored,
         reason: "scenario_correct",
@@ -164,9 +214,15 @@ export async function answer({ sessionId, userId, answerIndex = null, freeText =
 }
 
 /** Reveal stats & winner (does not post to Discord; command will do it). */
-export async function reveal({ guildId, channelId }) {
+export async function reveal({ guildId, channelId, sessionId }) {
   try {
-    const session = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId }));
+    // Support both sessionId and guildId+channelId lookups
+    let session;
+    if (sessionId) {
+      session = await withCollection(SESSIONS, (col) => col.findOne({ _id: sessionId }));
+    } else {
+      session = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId }));
+    }
     if (!session) return err("NOT_FOUND", "Session not found.");
 
     const answers = await withCollection(ANSWERS, (col) => col.find({ sessionId: session._id }).sort({ createdAt: 1 }).toArray());
@@ -201,6 +257,24 @@ export async function reveal({ guildId, channelId }) {
 
 export async function cancel({ guildId, channelId }) {
   try {
+    // Debug: Check what sessions exist
+    const allSessions = await withCollection(SESSIONS, (col) => col.find({ guildId, channelId }).sort({ createdAt: -1 }).toArray());
+    console.log(`[DEBUG] cancel: Found ${allSessions.length} sessions for guild=${guildId}, channel=${channelId}`);
+    if (allSessions.length > 0) {
+      // Show most recent session (sorted by createdAt desc)
+      console.log(`[DEBUG] cancel: Most recent session:`, JSON.stringify({
+        _id: allSessions[0]._id,
+        active: allSessions[0].active,
+        createdAt: allSessions[0].createdAt,
+        revealAt: allSessions[0].revealAt,
+        now: new Date()
+      }));
+
+      // Count how many are active
+      const activeCount = allSessions.filter(s => s.active).length;
+      console.log(`[DEBUG] cancel: Active sessions: ${activeCount} / ${allSessions.length}`);
+    }
+
     const res = await withCollection(SESSIONS, (col) => col.findOneAndUpdate(
       { guildId, channelId, active: true },
       { $set: { active: false, revealAt: new Date() } },
@@ -255,3 +329,93 @@ function sanitize(session) {
 function normalize(s) {
   return String(s || "").trim().toLowerCase();
 }
+
+/**
+ * Get session statistics
+ */
+export async function getSessionStats({ guildId, channelId, sessionId }) {
+  try {
+    // Support both sessionId and guildId+channelId lookups
+    let session;
+    if (sessionId) {
+      session = await withCollection(SESSIONS, (col) => col.findOne({ _id: sessionId }));
+    } else {
+      session = await withCollection(SESSIONS, (col) => col.findOne({ guildId, channelId }));
+    }
+    if (!session) {
+      return err("NOT_FOUND", "Session not found");
+    }
+
+    const answers = await withCollection(ANSWERS, (col) =>
+      col.find({ sessionId: session._id }).toArray()
+    );
+
+    const correctAnswers = answers.filter(a => a.correct);
+    const uniqueUsers = new Set(answers.map(a => a.userId));
+
+    return ok({
+      session: sanitize(session),
+      totalAnswers: answers.length,
+      correctAnswers: correctAnswers.length,
+      uniqueUsers: uniqueUsers.size,
+      isActive: session.active,
+    });
+  } catch (cause) {
+    return err("DB_ERROR", "Failed to get session stats", cause);
+  }
+}
+
+/**
+ * Global cleanup - deactivate all expired sessions across all guilds
+ * Should be called periodically (e.g., every 5 minutes via cron)
+ */
+export async function cleanupExpiredSessions() {
+  const now = new Date();
+  try {
+    const result = await withCollection(SESSIONS, async (col) => {
+      // Find all active sessions past their revealAt time
+      const expiredCount = await col.countDocuments({
+        active: true,
+        revealAt: { $lt: now }
+      });
+
+      if (expiredCount > 0) {
+        // Deactivate all expired sessions
+        await col.updateMany(
+          { active: true, revealAt: { $lt: now } },
+          { $set: { active: false, revealAt: now } }
+        );
+
+        incCounter("scenario_cleanup_batch_total");
+      }
+
+      return expiredCount;
+    });
+
+    const activeCount = await withCollection(SESSIONS, c => c.countDocuments({ active: true }));
+    setGauge("active_games", activeCount, {});
+
+    return ok({ cleanedUp: result, activeRemaining: activeCount });
+  } catch (cause) {
+    return err("DB_ERROR", "Cleanup failed", cause);
+  }
+}
+
+// Auto-run cleanup every 5 minutes
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    cleanupExpiredSessions().catch(err => {
+      console.error('[SCENARIO] Auto-cleanup failed:', err);
+    });
+  }, 5 * 60 * 1000); // 5 minutes
+}
+
+// Default export for backward compatibility
+export default {
+  startSession,
+  answer,
+  reveal,
+  cancel,
+  getSessionStats,
+  cleanupExpiredSessions,
+};

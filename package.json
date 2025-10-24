@@ -8,16 +8,33 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy-commands": "node scripts/deploy-commands.js",
-    "seed": "node scripts/seed-data.js"
+    "deploy:dev": "node scripts/deploy-commands.js",
+    "deploy:global": "node scripts/deploy-commands-global.js",
+    "seed": "node scripts/seed-data.js",
+    "seed:all": "node scripts/seed-all-docker.js",
+    "seed:personas": "node scripts/seed-personas.js",
+    "seed:greetings": "node scripts/seed-greetings.js",
+    "seed:scenarios": "node scripts/seed-scenarios.js",
+    "seed:media": "node scripts/seed-media.js",
+    "seed:points": "node scripts/seed-points.js",
+    "verify": "node scripts/verify-setup.js",
+    "seed:docker": "docker exec elioverse-bot-bot-1 node scripts/seed-personas.js && docker exec elioverse-bot-bot-1 node scripts/seed-greetings.js && docker exec elioverse-bot-bot-1 node scripts/seed-media.js && docker exec elioverse-bot-bot-1 node scripts/seed-points.js",
+    "test": "node test-ai-services.js",
+    "ingest:rag": "node scripts/ingest-rag.js",
+    "test:rag": "node scripts/rag-smoketest.js",
+    "ensure-indexes": "node src/db/ensure-indexes.js"
   },
   "engines": {
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "axios": "^1.6.0",
     "discord.js": "^14.14.1",
-    "mongodb": "^6.3.0",
-    "node-cron": "^3.0.3",
     "dotenv": "^16.3.1",
+    "mongodb": "^6.3.0",
+    "nanoid": "^5.1.6",
+    "node-cron": "^3.0.3",
+    "openai": "^6.5.0",
     "prom-client": "^15.1.0"
   },
   "devDependencies": {

@@ -116,15 +116,28 @@ export async function getProfile(guildId, userId) {
 /**
  * Public: leaderboard by points (desc).
  */
-export async function leaderboard(guildId, limit = 10) {
+export async function leaderboard({ guildId, limit = 10 }) {
   const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'points.leaderboard' });
   try {
     const col = collections('profiles');
     const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
     const cur = col.find({ guildId }).sort({ points: -1, updatedAt: -1 }).limit(n);
     const docs = await cur.toArray();
+
+    // Get total count
+    const total = await col.countDocuments({ guildId });
+
+    // Add rank to each entry
+    const entries = docs.map((d, index) => ({
+      rank: index + 1,
+      userId: d.userId,
+      points: d.points || 0,
+      level: d.level || 0,
+      streak: d.streak || 0
+    }));
+
     stop();
-    return ok(docs.map(d => ({ userId: d.userId, points: d.points || 0, level: d.level || 0 })));
+    return ok({ entries, total });
   } catch (e) {
     log.error('leaderboard failed', { e: String(e), guildId, limit });
     stop();
