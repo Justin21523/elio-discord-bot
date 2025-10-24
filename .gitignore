@@ -50,6 +50,7 @@ backup/
 # local data
 data/
 .claude/
+models/
 
 # Misc
 *.swp
