@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 // src/services/ai/moderation.js
 // ============================================================================
 // Moderation Service - Content safety and filtering
@@ -154,15 +153,4 @@ export async function batchScan(params) {
       },
     };
   }
-=======
-// Moderation Facade. English-only.
-import { httpPostJson } from './_client.js';
-
-export async function scan(text) {
-  const res = await httpPostJson('/moderation/scan', { text });
-  if (res.status >= 400 || !res.json?.ok) {
-    return { ok: false, error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Moderation failed', cause: res.json } };
-  }
-  return { ok: true, data: res.json };
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
 }

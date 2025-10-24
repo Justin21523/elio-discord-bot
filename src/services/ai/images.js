@@ -6,7 +6,7 @@
 // All functions return Result<T>.
 
 import { httpPostJson } from './_client.js';
-import { CONFIG } from '../../config.js';
+import { AI_MODEL_VLM, AI_SERVICE_TIMEOUT_MS } from '../../config.js';
 
 /**
  * @typedef {import('../types').AppError} AppError
@@ -14,9 +14,9 @@ import { CONFIG } from '../../config.js';
  */
 
 const VL_OPTS = () => ({
-  model: CONFIG.vlm.model,
-  enhance_image: CONFIG.vlm.enhanceImage,
-  analyze_quality: CONFIG.vlm.analyzeQuality,
+  model: AI_MODEL_VLM,
+  enhance_image: false,
+  analyze_quality: false,
 });
 
 export async function captionB64(image_b64, max_length = 80, opts = {}) {
@@ -27,7 +27,7 @@ export async function captionB64(image_b64, max_length = 80, opts = {}) {
   };
 
   try {
-    const res = await httpPostJson('/images/caption/b64', payload, CONFIG.vlm.timeoutMs);
+    const res = await httpPostJson('/images/caption/b64', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'AI_MODEL_ERROR', message: 'Caption(b64) failed', cause: res.json } };
     }
@@ -46,7 +46,7 @@ export async function vqaB64(image_b64, question, max_length = 128, opts = {}) {
   };
 
   try {
-    const res = await httpPostJson('/images/vqa/b64', payload, CONFIG.vlm.timeoutMs);
+    const res = await httpPostJson('/images/vqa/b64', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'AI_MODEL_ERROR', message: 'VQA(b64) failed', cause: res.json } };
     }
@@ -59,7 +59,7 @@ export async function vqaB64(image_b64, question, max_length = 128, opts = {}) {
 export async function captionUrl(url, max_length = 80, opts = {}) {
   const payload = { url, max_length, options: { ...VL_OPTS(), ...(opts || {}) } };
   try {
-    const res = await httpPostJson('/images/caption/url', payload, CONFIG.vlm.timeoutMs);
+    const res = await httpPostJson('/images/caption/url', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'AI_MODEL_ERROR', message: 'Caption(url) failed', cause: res.json } };
     }
@@ -72,7 +72,7 @@ export async function captionUrl(url, max_length = 80, opts = {}) {
 export async function vqaUrl(url, question, max_length = 128, opts = {}) {
   const payload = { url, question, max_length, options: { ...VL_OPTS(), process_question: true, ...(opts || {}) } };
   try {
-    const res = await httpPostJson('/images/vqa/url', payload, CONFIG.vlm.timeoutMs);
+    const res = await httpPostJson('/images/vqa/url', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'AI_MODEL_ERROR', message: 'VQA(url) failed', cause: res.json } };
     }
@@ -89,7 +89,7 @@ export async function vqaUrl(url, question, max_length = 128, opts = {}) {
 export async function describe(input) {
   const payload = { ...input, options: VL_OPTS() };
   try {
-    const res = await httpPostJson('/images/describe', payload, CONFIG.vlm.timeoutMs);
+    const res = await httpPostJson('/images/describe', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'AI_MODEL_ERROR', message: 'Image describe failed', cause: res.json } };
     }

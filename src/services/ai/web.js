@@ -5,7 +5,7 @@
 // provider routing (Brave/SearXNG), and result normalization.
 
 import { httpGet, httpPostJson } from './_client.js';
-import { CONFIG } from '../../config.js';
+import { AI_SERVICE_TIMEOUT_MS } from '../../config.js';
 
 /**
  * @typedef {import('../types').AppError} AppError
@@ -16,11 +16,11 @@ export async function search(query, { top = 6 } = {}) {
   const payload = {
     query,
     top,
-    provider: CONFIG.webSearch.provider,
-    cache_ttl: CONFIG.webSearch.cacheTtl,
+    provider: 'brave', // Default provider
+    cache_ttl: 3600, // 1 hour cache
   };
   try {
-    const res = await httpPostJson('/web/search', payload, CONFIG.webSearch.timeoutMs);
+    const res = await httpPostJson('/web/search', payload, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Web search failed', cause: res.json } };
     }
@@ -32,7 +32,7 @@ export async function search(query, { top = 6 } = {}) {
 
 export async function fetchUrl(url) {
   try {
-    const res = await httpGet(`/web/fetch?url=${encodeURIComponent(url)}`, CONFIG.webSearch.timeoutMs);
+    const res = await httpGet(`/web/fetch?url=${encodeURIComponent(url)}`, AI_SERVICE_TIMEOUT_MS);
     if (res.status >= 400 || !res.json?.ok) {
       return { ok: false, error: { code: 'DEPENDENCY_UNAVAILABLE', message: 'Web fetch failed', cause: res.json } };
     }
