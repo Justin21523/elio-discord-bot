@@ -301,23 +301,27 @@ async def prepare_dataset(request: DatasetPrepareRequest):
         )
 
 
+class CancelJobRequest(BaseModel):
+    job_id: str
+
+
 @router.post("/cancel-job")
-async def cancel_training_job(job_id: str):
+async def cancel_training_job(request: CancelJobRequest):
     """Cancel running training job"""
     try:
-        if job_id not in TRAINING_JOBS:
+        if request.job_id not in TRAINING_JOBS:
             raise HTTPException(
                 404,
                 {
                     "ok": False,
                     "error": {
                         "code": "NOT_FOUND",
-                        "message": f"Job {job_id} not found",
+                        "message": f"Job {request.job_id} not found",
                     },
                 },
             )
 
-        job = TRAINING_JOBS[job_id]
+        job = TRAINING_JOBS[request.job_id]
 
         if job["status"] in ["completed", "failed", "cancelled"]:
             return {
@@ -328,9 +332,9 @@ async def cancel_training_job(job_id: str):
         job["status"] = "cancelled"
         job["end_time"] = datetime.now().isoformat()
 
-        logger.info(f"[FINETUNE] Cancelled: {job_id}")
+        logger.info(f"[FINETUNE] Cancelled: {request.job_id}")
 
-        return {"ok": True, "data": {"job_id": job_id, "status": "cancelled"}}
+        return {"ok": True, "data": {"job_id": request.job_id, "status": "cancelled"}}
     except HTTPException:
         raise
     except Exception as e:

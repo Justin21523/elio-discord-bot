@@ -32,6 +32,7 @@ class PersonaReplyRequest(BaseModel):
     system_style: Optional[str] = None
     max_tokens: int = Field(512, ge=50, le=2048)
     temperature: float = Field(0.8, ge=0.0, le=2.0)
+    use_finetuned: bool = Field(True, description="Use fine-tuned character model")
 
 
 class GenerateRequest(BaseModel):
@@ -41,6 +42,7 @@ class GenerateRequest(BaseModel):
     temperature: float = Field(0.7, ge=0.0, le=2.0)
     top_p: float = Field(0.9, ge=0.0, le=1.0)
     stop: Optional[List[str]] = None
+    use_finetuned: bool = Field(False, description="Use fine-tuned character model")
 
 
 class GenerateResponse(BaseModel):
@@ -191,6 +193,7 @@ Respond as {request.persona_name}:"""
             prompt=prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
+            use_finetuned=request.use_finetuned,
         )
 
         return {
@@ -226,6 +229,7 @@ async def generate(
             temperature=request.temperature,
             top_p=request.top_p,
             stop=request.stop,
+            use_finetuned=request.use_finetuned,
         )
 
         return {

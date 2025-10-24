@@ -22,6 +22,7 @@ class LLMService:
         temperature: float = 0.7,
         top_p: float = 0.9,
         stop: Optional[List[str]] = None,
+        use_finetuned: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate text completion
@@ -34,6 +35,7 @@ class LLMService:
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
             stop: Stop sequences
+            use_finetuned: Use fine-tuned character model (default: False)
 
         Returns:
             Dictionary with generated text and metadata including 'text' and 'usage'
@@ -48,10 +50,22 @@ class LLMService:
                 model=model_name,
                 prompt_length=len(prompt),
                 max_tokens=max_tokens,
+                use_finetuned=use_finetuned,
             )
 
             # Load model and tokenizer
-            model, tokenizer = model_manager.get_model(model_name, "llm")
+            # Use fine-tuned model if requested and enabled
+            if use_finetuned and settings.FINETUNED_MODEL_ENABLED:
+                from app.models.finetuned import finetuned_model_manager
+
+                try:
+                    model, tokenizer = finetuned_model_manager.get_model()
+                    log_info("Using fine-tuned character model")
+                except Exception as e:
+                    log_error("Failed to load fine-tuned model, falling back to base", error=str(e))
+                    model, tokenizer = model_manager.get_model(model_name, "llm")
+            else:
+                model, tokenizer = model_manager.get_model(model_name, "llm")
 
             # Format prompt based on model type
             formatted_prompt = self._format_prompt(
@@ -69,16 +83,22 @@ class LLMService:
 
             # Generate
             with torch.no_grad():
-                outputs = model.generate(
+                gen_kwargs = {
                     **inputs,
-                    max_new_tokens=max_tokens,
-                    temperature=temperature,
-                    top_p=top_p,
-                    do_sample=temperature > 0,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                    stop_strings=stop_sequences or [],
-                )
+                    "max_new_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "do_sample": temperature > 0,
+                    "pad_token_id": tokenizer.pad_token_id,
+                    "eos_token_id": tokenizer.eos_token_id,
+                }
+
+                # Try to add stop_strings if supported (transformers 4.40+)
+                # Don't add if empty to avoid model validation errors
+                # Note: DeepSeek and some models don't support stop_strings
+                # We skip it for now to avoid validation errors
+
+                outputs = model.generate(**gen_kwargs)
 
             # Decode output
             generated_ids = outputs[0][inputs["input_ids"].shape[1] :]

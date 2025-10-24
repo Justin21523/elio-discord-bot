@@ -7,7 +7,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -34,6 +34,7 @@ from app.api.routers import (
     story_router,
     finetuning_router,
     moderation_router,
+    persona_router,
 )
 
 # Setup logging
@@ -69,15 +70,18 @@ async def lifespan(app: FastAPI):
         # Preload models based on configuration
         if settings.PRELOAD_LLM:
             logger.info("[BOOT] Preloading LLM...")
-            await model_manager.get_llm()
+            model_manager.load_model(settings.LLM_MODEL, "llm")
+            logger.info("[BOOT] LLM loaded successfully")
 
         if settings.PRELOAD_VLM:
             logger.info("[BOOT] Preloading VLM...")
-            await model_manager.get_vlm()
+            model_manager.load_model(settings.VLM_MODEL, "vlm")
+            logger.info("[BOOT] VLM loaded successfully")
 
         if settings.PRELOAD_EMBEDDINGS:
             logger.info("[BOOT] Preloading Embeddings...")
-            await model_manager.get_embeddings()
+            model_manager.load_model(settings.EMBED_MODEL, "embeddings")
+            logger.info("[BOOT] Embeddings loaded successfully")
 
         # Initialize RAG service
         rag_service = RAGSearchService(
@@ -194,6 +198,7 @@ async def root():
             "story": "/story/*",
             "finetune": "/finetune/*",
             "moderation": "/moderation/*",
+            "persona": "/persona/*",
         },
     }
 
@@ -207,6 +212,105 @@ app.include_router(agent_router.router, prefix="/agent", tags=["Agent"])
 app.include_router(story_router.router, prefix="/story", tags=["Story"])
 app.include_router(finetuning_router.router, prefix="/finetune", tags=["Finetuning"])
 app.include_router(moderation_router.router, prefix="/moderation", tags=["Moderation"])
+app.include_router(persona_router.router, prefix="/persona", tags=["Persona"])
+
+
+# ------------------------------
+# Compatibility Endpoints (/v1/*)
+# These shim endpoints adapt Node adapters expecting /v1/* to our /llm/* and /vlm/* stacks.
+# ------------------------------
+
+
+@app.post("/v1/generate")
+async def v1_generate(payload: dict = Body(...)):
+    """
+    Expected payload from Node:
+    {
+      "model": "text-model-name",
+      "prompt": "string",
+      "max_tokens": int,
+      "temperature": float,
+      "top_p": float,
+      "stop_sequences": [],
+      "system_prompt": "string"
+    }
+    """
+    manager: ModelManager = app.state.model_manager  # type: ignore
+    llm = await manager.get_llm()
+    res = await llm.generate(
+        system=payload.get("system_prompt", "") or None,
+        prompt=payload.get("prompt", ""),
+        max_tokens=int(payload.get("max_tokens", 512)),
+        temperature=float(payload.get("temperature", 0.7)),
+        top_p=float(payload.get("top_p", 0.9)),
+    )
+    text = (res or {}).get("text", "")
+    usage = (res or {}).get("usage", {})
+    return {"text": text, "tokens_used": usage.get("total_tokens", 0)}
+
+
+@app.post("/v1/chat")
+async def v1_chat(payload: dict = Body(...)):
+    """
+    Expected payload:
+    {
+      "model": "text-model-name",
+      "messages": [{"role":"system|user|assistant","content":"..."}],
+      "max_tokens": int, "temperature": float, "top_p": float, "stop_sequences":[]
+    }
+    """
+    manager: ModelManager = app.state.model_manager  # type: ignore
+    llm = await manager.get_llm()
+
+    # Flatten to (system, prompt) if chat() not available in your ModelManager
+    system_msg = next(
+        (
+            m["content"]
+            for m in payload.get("messages", [])
+            if m.get("role") == "system"
+        ),
+        None,
+    )
+    user_concat = "\n".join(
+        [
+            m["content"]
+            for m in payload.get("messages", [])
+            if m.get("role") in ("user", "assistant")
+        ]
+    )
+
+    res = await llm.generate(
+        system=system_msg,
+        prompt=user_concat,
+        model_name=payload.get("model"),
+        max_tokens=int(payload.get("max_tokens", 512)),
+        temperature=float(payload.get("temperature", 0.7)),
+        top_p=float(payload.get("top_p", 0.9)),
+    )
+    text = (res or {}).get("text", "")
+    usage = (res or {}).get("usage", {})
+    return {"text": text, "tokens_used": usage.get("total_tokens", 0)}
+
+
+@app.post("/v1/vision/describe")
+async def v1_vision_describe(payload: dict = Body(...)):
+    """
+    Expected payload:
+    { "model": "vlm-model", "image_url": "http...", "prompt": "string", "max_tokens": int }
+    """
+    manager: ModelManager = app.state.model_manager  # type: ignore
+    vlm = await manager.get_vlm()
+    res = await vlm.describe_image(
+        image_url=payload.get("image_url"),  # type: ignore
+        question=payload.get("question") or "Describe the image in detail.",
+        max_tokens=int(payload.get("max_tokens", 256)),
+    )
+    # normalize expected fields
+    return {
+        "description": (res or {}).get("description") or (res or {}).get("text") or "",
+        "tags": (res or {}).get("tags", []),
+        "tokens_used": (res or {}).get("usage", {}).get("total_tokens", 0),
+    }
 
 
 if __name__ == "__main__":
