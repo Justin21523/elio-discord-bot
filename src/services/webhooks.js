@@ -106,4 +106,7 @@ export async function personaSay(channelId, persona, payload) {
   }
 }
 
-export default { setClient, personaSay };
+// Alias export for backward compatibility
+export const sendAsPersona = personaSay;
+
+export default { setClient, personaSay, sendAsPersona };
