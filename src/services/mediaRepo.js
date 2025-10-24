@@ -1,13 +1,12 @@
-<<<<<<< HEAD
 /**
  * services/mediaRepo.js
  * Media repository service with tag filtering, NSFW checks, and resilient operations.
  * Follows MODULE_INTERFACES.md exactly.
  */
 
-import { getDB } from "../db/mongo.js";
+import { getDb as getDB } from "../db/mongo.js";
 import { logger } from "../util/logger.js";
-import { ErrorCode } from "../config.js";
+import { ErrorCodes as ErrorCode } from "../config.js";
 
 /**
  * Pick a random enabled media item
@@ -337,122 +336,124 @@ export async function getStats() {
       },
     };
   }
-=======
-// /src/services/mediaRepo.js
-// English-only. Media repository for random drops & CRUD.
-// Follows MODULE_INTERFACES.md MediaRepo interface.
-
-import { collections } from '../db/mongo.js';
-import { logger } from '../util/logger.js';
-import metrics, { incCounter, startTimer, METRIC_NAMES } from '../util/metrics.js';
-
-const log = logger.child({ svc: 'MediaRepo' });
-
-/** Standard error wrapper */
-function err(code, message, cause, details) {
-  return { ok: false, error: { code, message, cause, details } };
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
 }
 
 /** Validate minimal shape for add() */
 function validateNewItem(item) {
-  if (!item || typeof item !== 'object') return 'item required';
-  if (!['gif', 'image'].includes(item.type)) return 'type must be "gif"|"image"';
-  if (!item.url || typeof item.url !== 'string' || item.url.length < 5) return 'url invalid';
+  if (!item || typeof item !== "object") return "item required";
+  if (!["gif", "image"].includes(item.type))
+    return 'type must be "gif"|"image"';
+  if (!item.url || typeof item.url !== "string" || item.url.length < 5)
+    return "url invalid";
   return null;
 }
 
-export const MediaRepo = {
-  /**
-   * pickRandom({ nsfwAllowed, tags? })
-   * - enabled:true
-   * - nsfw filter unless allowed
-   * - optional tag intersection
-   */
-  async pickRandom(filter = { nsfwAllowed: false, tags: undefined }) {
-    try {
-      const stop = startTimer(METRIC_NAMES.agent_step_seconds, { tool: 'media.pickRandom' });
-      const q = { enabled: true };
-      if (!filter.nsfwAllowed) q.nsfw = { $ne: true };
-      if (Array.isArray(filter.tags) && filter.tags.length) {
-        q.tags = { $in: filter.tags.map(String) };
-      }
+/**
+ * Execute a media drop - pick and post random media to a channel
+ * @param {Object} params
+ * @param {Client} params.client - Discord client
+ * @param {string} params.channelId - Channel ID to post to
+ * @param {string} params.guildId - Guild ID for context
+ * @param {boolean} [params.nsfwAllowed] - Whether NSFW is allowed
+ * @returns {Promise<{ok: boolean, data?: {mediaId: string, url: string}, error?: AppError}>}
+ */
+export async function executeDrop({ client, channelId, guildId, nsfwAllowed = false }) {
+  try {
+    // Pick random media
+    const pickResult = await pickRandom({ nsfwAllowed, guildId });
 
-      const pipeline = [
-        { $match: q },
-        { $sample: { size: 1 } },
-        { $limit: 1 },
-      ];
-
-      const docs = await collections('media').aggregate(pipeline).toArray();
-      stop();
-      incCounter(METRIC_NAMES.jobs_total, { kind: 'media_pick' }, 1);
-
-      if (!docs || docs.length === 0) return { ok: true, data: null };
-      return { ok: true, data: docs[0] };
-    } catch (e) {
-      log.error('pickRandom failed', { e: String(e) });
-      return err('DB_ERROR', 'Failed to pick media', e);
+    if (!pickResult.ok || !pickResult.data) {
+      return pickResult;
     }
-  },
 
-  /** add(item) */
-  async add(item) {
-    try {
-      const v = validateNewItem(item);
-      if (v) return err('VALIDATION_FAILED', v);
+    const media = pickResult.data;
 
-      const doc = {
-        type: item.type,
-        url: item.url,
-        tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
-        nsfw: !!item.nsfw,
-        enabled: item.enabled !== false,
-        addedAt: new Date(),
-        addedByUserId: item.addedByUserId ? String(item.addedByUserId) : undefined,
+    // Get channel
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) {
+      return {
+        ok: false,
+        error: {
+          code: ErrorCode.NOT_FOUND,
+          message: "Channel not found or not text-based",
+        },
       };
-
-      const res = await collections('media').insertOne(doc);
-      incCounter(METRIC_NAMES.jobs_total, { kind: 'media_add' }, 1);
-      return { ok: true, data: { insertedId: String(res.insertedId) } };
-    } catch (e) {
-      // handle duplicate url unique index (if added later)
-      return err('DB_ERROR', 'Failed to add media', e);
     }
-  },
 
-  /** disable(id) */
-  async disable(id) {
-    try {
-      const { ObjectId } = await import('mongodb');
-      const res = await collections('media').updateOne(
-        { _id: new ObjectId(String(id)) },
-        { $set: { enabled: false, updatedAt: new Date() } }
-      );
-      return { ok: true, data: { modified: res.modifiedCount > 0 } };
-    } catch (e) {
-      return err('DB_ERROR', 'Failed to disable media', e);
+    // Post media
+    await channel.send({
+      content: media.tags && media.tags.length > 0
+        ? `**Tags**: ${media.tags.join(", ")}`
+        : "",
+      files: [media.url],
+    });
+
+    logger.info("[MediaRepo] Drop executed successfully", {
+      guildId,
+      channelId,
+      mediaId: media._id.toString(),
+      type: media.type,
+    });
+
+    return {
+      ok: true,
+      data: {
+        mediaId: media._id.toString(),
+        url: media.url,
+        type: media.type,
+      },
+    };
+  } catch (error) {
+    logger.error("[MediaRepo] executeDrop failed", {
+      error: error.message,
+      guildId,
+      channelId,
+    });
+    return {
+      ok: false,
+      error: {
+        code: ErrorCode.UNKNOWN,
+        message: "Failed to execute drop",
+        cause: error,
+      },
+    };
+  }
+}
+
+/**
+ * Notify about drop failure
+ * @param {Object} params
+ * @param {Client} params.client - Discord client
+ * @param {string} params.guildId - Guild ID
+ * @param {string} params.channelId - Channel ID
+ * @param {AppError} params.error - Error that occurred
+ * @returns {Promise<void>}
+ */
+export async function notifyDropFailure({ client, guildId, channelId, error }) {
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (channel && channel.isTextBased()) {
+      await channel.send({
+        content: `⚠️ **Scheduled drop failed**: ${error.message}\nPlease check media availability or bot permissions.`,
+      });
     }
-  },
+  } catch (notifyError) {
+    logger.error("[MediaRepo] Failed to notify about drop failure", {
+      error: notifyError.message,
+      guildId,
+      channelId,
+      originalError: error.message,
+    });
+  }
+}
 
-  /** list({ enabled?, tags?, limit? }) */
-  async list(query = {}) {
-    try {
-      const q = {};
-      if (typeof query.enabled === 'boolean') q.enabled = query.enabled;
-      if (Array.isArray(query.tags) && query.tags.length) q.tags = { $in: query.tags.map(String) };
-
-      const limit = Number(query.limit || 50);
-      const rows = await collections('media')
-        .find(q)
-        .sort({ addedAt: -1 })
-        .limit(limit)
-        .toArray();
-      return { ok: true, data: rows };
-    } catch (e) {
-      return err('DB_ERROR', 'Failed to list media', e);
-    }
-  },
+// Legacy default export for backward compatibility
+export default {
+  pickRandom,
+  add,
+  disable,
+  list,
+  getStats,
+  executeDrop,
+  notifyDropFailure,
 };
-
-export default MediaRepo;
