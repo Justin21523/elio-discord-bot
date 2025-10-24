@@ -1,23 +1,51 @@
-<<<<<<< HEAD
 /**
  * commands/drop.js
  * Drop command handlers: /drop set, /drop now, /drop disable
  * Thin handlers - business logic in services.
  */
 
-import { getDB } from "../db/mongo.js";
+import { SlashCommandBuilder } from "discord.js";
+import { getDb as getDB } from "../db/mongo.js";
 import { logger } from "../util/logger.js";
-import { ErrorCode } from "../config.js";
+import { ErrorCodes as ErrorCode } from "../config.js";
 import { successEmbed, errorEmbed } from "../util/replies.js";
 import { arm, disarm } from "../services/scheduler.js";
-import { executeDrop, notifyDropFailure } from "../services/dropService.js";
+import { executeDrop, notifyDropFailure } from "../services/mediaRepo.js";
+
+export const data = new SlashCommandBuilder()
+  .setName("drop")
+  .setDescription("Manage media drops")
+  .addSubcommand((sub) =>
+    sub
+      .setName("set")
+      .setDescription("Schedule daily drops")
+      .addStringOption((opt) =>
+        opt
+          .setName("time")
+          .setDescription("Time in HH:MM format (e.g., 09:30)")
+          .setRequired(true)
+      )
+      .addChannelOption((opt) =>
+        opt
+          .setName("channel")
+          .setDescription("Channel for drops")
+          .setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub.setName("now").setDescription("Post a drop immediately")
+  )
+  .addSubcommand((sub) =>
+    sub.setName("disable").setDescription("Disable scheduled drops")
+  );
 
 /**
  * Main drop command router
  * @param {ChatInputCommandInteraction} interaction
  * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
  */
-export default async function handleDrop(interaction) {
+export async function execute(interaction) {
+  await interaction.deferReply();
   const subcommand = interaction.options.getSubcommand();
 
   switch (subcommand) {
@@ -289,128 +317,5 @@ async function handleDropDisable(interaction) {
         cause: error,
       },
     };
-=======
-// /src/commands/drop.js
-// Slash command: /drop set | now
-// UX: defer within 3s, friendly errors, logs + metrics.
-
-import { SlashCommandBuilder } from 'discord.js';
-import { logger } from '../util/logger.js';
-import { incCounter, startTimer, METRIC_NAMES } from '../util/metrics.js';
-import MediaRepo from '../services/mediaRepo.js';
-import Scheduler from '../services/scheduler.js';
-import { collections } from '../db/mongo.js';
-
-const log = logger.child({ cmd: 'drop' });
-
-export const data = new SlashCommandBuilder()
-  .setName('drop')
-  .setDescription('Random media drop controls (admin)')
-  .addSubcommand((s) =>
-    s
-      .setName('now')
-      .setDescription('Post a random media drop to the current channel')
-  )
-  .addSubcommand((s) =>
-    s
-      .setName('set')
-      .setDescription('Schedule a daily drop in this channel (HH:MM UTC)')
-      .addStringOption((o) =>
-        o.setName('hhmm').setDescription('HH:MM (UTC)').setRequired(true)
-      )
-  );
-
-export async function execute(interaction) {
-  const stopLatency = startTimer(METRIC_NAMES.command_latency_seconds, {
-    command: 'drop',
-  });
-  const { guildId, channelId, user } = interaction;
-
-  try {
-    await interaction.deferReply({ ephemeral: true });
-
-    const sub = interaction.options.getSubcommand();
-
-    if (sub === 'now') {
-      // Pick & send
-      const pick = await MediaRepo.pickRandom({ nsfwAllowed: false });
-      if (!pick.ok) throw new Error(pick.error.message);
-      if (!pick.data) {
-        await interaction.editReply('No media available right now.');
-        return;
-      }
-
-      const media = pick.data;
-      const content = media.type === 'gif' ? media.url : undefined;
-      const embed =
-        media.type === 'image'
-          ? {
-              title: '🎁 Drop',
-              description: media.tags?.length
-                ? `Tags: ${media.tags.join(', ')}`
-                : undefined,
-              image: { url: media.url },
-            }
-          : undefined;
-
-      await interaction.channel.send({
-        content,
-        embeds: embed ? [embed] : [],
-      });
-
-      incCounter(METRIC_NAMES.commands_total, { command: 'drop_now' }, 1);
-      await interaction.editReply('Drop sent ✅');
-      stopLatency();
-      return;
-    }
-
-    if (sub === 'set') {
-      const hhmm = interaction.options.getString('hhmm');
-      // Upsert schedule in DB
-      await collections('schedules').updateOne(
-        { guildId: String(guildId), kind: 'drop' },
-        {
-          $set: {
-            guildId: String(guildId),
-            channelId: String(channelId),
-            kind: 'drop',
-            hhmm: String(hhmm),
-            enabled: true,
-            updatedAt: new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
-        },
-        { upsert: true }
-      );
-
-      // Arm scheduler
-      const armed = await Scheduler.arm({
-        guildId: String(guildId),
-        channelId: String(channelId),
-        kind: 'drop',
-        hhmm: String(hhmm),
-      });
-      if (!armed.ok) throw new Error(armed.error.message);
-
-      incCounter(METRIC_NAMES.commands_total, { command: 'drop_set' }, 1);
-      await interaction.editReply(`Daily drop scheduled at ${hhmm} UTC ✅`);
-      stopLatency();
-      return;
-    }
-
-    await interaction.editReply('Unknown subcommand.');
-    stopLatency();
-  } catch (e) {
-    log.error('command failed', {
-      guildId,
-      channelId,
-      userId: user?.id,
-      e: String(e),
-    });
-    stopLatency();
-    await interaction.editReply('Something went wrong (drop).');
->>>>>>> 8e08c6071dd76d67fb7ab80ef3afdfe83828445a
   }
 }
-
-export default { data, execute };

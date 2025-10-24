@@ -14,6 +14,14 @@ export const data = new SlashCommandBuilder()
   .setDescription("Test AI capabilities")
   .addSubcommand((sub) =>
     sub
+      .setName("ask")
+      .setDescription("Ask AI a question")
+      .addStringOption((opt) =>
+        opt.setName("question").setDescription("Your question").setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
       .setName("chat")
       .setDescription("Chat with AI")
       .addStringOption((opt) =>
@@ -53,23 +61,72 @@ export async function execute(interaction) {
   incrementCounter("commands_total", { command: "ai", subcommand });
 
   try {
-    if (subcommand === "chat") {
+    if (subcommand === "ask") {
+      const question = interaction.options.getString("question");
+
+      // Send progress update after 5 seconds
+      const progressTimeout = setTimeout(async () => {
+        try {
+          await interaction.editReply("🔍 Searching knowledge base and generating answer...");
+        } catch (e) {
+          // Ignore if already replied
+        }
+      }, 5000);
+
+      try {
+        const result = await agentTask("rag_query", {
+          query: question,
+          guildId: interaction.guildId,
+        });
+
+        clearTimeout(progressTimeout);
+
+        if (!result.ok) {
+          await sendErrorReply(interaction, result.error);
+          return;
+        }
+
+        await sendSuccessReply(interaction, {
+          title: "🤖 AI Answer",
+          description: result.data.finalResponse || result.data.answer || "I couldn't find an answer.",
+        });
+      } catch (error) {
+        clearTimeout(progressTimeout);
+        throw error;
+      }
+    } else if (subcommand === "chat") {
       const message = interaction.options.getString("message");
 
-      const result = await agentTask("rag_query", {
-        query: message,
-        guildId: interaction.guildId,
-      });
+      // Send progress update after 5 seconds
+      const progressTimeout = setTimeout(async () => {
+        try {
+          await interaction.editReply("💬 Thinking...");
+        } catch (e) {
+          // Ignore if already replied
+        }
+      }, 5000);
 
-      if (!result.ok) {
-        await sendErrorReply(interaction, result.error);
-        return;
+      try {
+        const result = await agentTask("rag_query", {
+          query: message,
+          guildId: interaction.guildId,
+        });
+
+        clearTimeout(progressTimeout);
+
+        if (!result.ok) {
+          await sendErrorReply(interaction, result.error);
+          return;
+        }
+
+        await sendSuccessReply(interaction, {
+          title: "🤖 AI Response",
+          description: result.data.finalResponse || result.data.answer || "I couldn't generate a response.",
+        });
+      } catch (error) {
+        clearTimeout(progressTimeout);
+        throw error;
       }
-
-      await sendSuccessReply(interaction, {
-        title: "🤖 AI Response",
-        description: result.data.finalResponse,
-      });
     } else if (subcommand === "image") {
       const attachment = interaction.options.getAttachment("image");
       const question = interaction.options.getString("question");
