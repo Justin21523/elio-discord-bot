@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { run as runAgent } from "./agent.js";
-import { AI_ENABLED, ErrorCodes } from "../../config.js";
+import { AI_ENABLED, AI_MOCK_MODE, ErrorCodes } from "../../config.js";
 import { logger } from "../../util/logger.js";
 
 /**
@@ -16,7 +16,7 @@ import { logger } from "../../util/logger.js";
  * @returns {Promise<{ok: true, data: string} | {ok: false, error: object}>}
  */
 export async function summarizeNews(params) {
-  if (!AI_ENABLED) {
+  if (!AI_ENABLED && !AI_MOCK_MODE) {
     return {
       ok: false,
       error: {
@@ -50,7 +50,7 @@ export async function summarizeNews(params) {
  * @returns {Promise<{ok: true, data: string} | {ok: false, error: object}>}
  */
 export async function personaReply(params) {
-  if (!AI_ENABLED) {
+  if (!AI_ENABLED && !AI_MOCK_MODE) {
     return {
       ok: false,
       error: {
@@ -86,7 +86,7 @@ export async function personaReply(params) {
  * @returns {Promise<{ok: true, data: string} | {ok: false, error: object}>}
  */
 export async function imageReact(params) {
-  if (!AI_ENABLED) {
+  if (!AI_ENABLED && !AI_MOCK_MODE) {
     return {
       ok: false,
       error: {
@@ -117,7 +117,7 @@ export async function imageReact(params) {
  * @returns {Promise<{ok: true, data: object} | {ok: false, error: object}>}
  */
 export async function agentTask(kind, params) {
-  if (!AI_ENABLED) {
+  if (!AI_ENABLED && !AI_MOCK_MODE) {
     return {
       ok: false,
       error: {

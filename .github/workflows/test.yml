@@ -1,0 +1,194 @@
+# GitHub Actions CI - Test Workflow
+# Runs tests on push to main and pull requests
+
+name: CI Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ===========================================
+  # Node.js Bot Tests
+  # ===========================================
+  test-bot:
+    name: Node.js Bot Tests
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          DB_NAME: test_communiverse_bot
+          DISCORD_TOKEN: test_token
+          APP_ID: test_app_id
+          AI_ENABLED: false
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          DB_NAME: test_communiverse_bot
+          DISCORD_TOKEN: test_token
+          APP_ID: test_app_id
+          AI_ENABLED: false
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          MONGODB_URI: mongodb://localhost:27017
+          DB_NAME: test_communiverse_bot
+          DISCORD_TOKEN: test_token
+          APP_ID: test_app_id
+          AI_ENABLED: false
+
+  # ===========================================
+  # Python AI Service Tests
+  # ===========================================
+  test-ai-service:
+    name: Python AI Service Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ai-service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: ai-service/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Run Python tests
+        run: |
+          python -m pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+        env:
+          PYTHONPATH: .
+          AI_WAREHOUSE_ROOT: /tmp/ai_warehouse
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          file: ai-service/coverage.xml
+          flags: ai-service
+          fail_ci_if_error: false
+
+  # ===========================================
+  # Lint Check
+  # ===========================================
+  lint:
+    name: Lint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint --if-present
+        continue-on-error: true
+
+  # ===========================================
+  # Docker Build Test
+  # ===========================================
+  build-docker:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Bot Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: elio-discord-bot:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build AI Service Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ai-service
+          push: false
+          tags: elio-ai-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
+
+  # ===========================================
+  # All Tests Pass Gate
+  # ===========================================
+  tests-passed:
+    name: All Tests Passed
+    runs-on: ubuntu-latest
+    needs: [test-bot, test-ai-service, lint, build-docker]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.test-bot.result }}" == "failure" ]]; then
+            echo "Bot tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.test-ai-service.result }}" == "failure" ]]; then
+            echo "AI service tests failed"
+            exit 1
+          fi
+          echo "All required tests passed!"

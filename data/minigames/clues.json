@@ -1,0 +1,24 @@
+{
+  "documents": [
+    {
+      "id": "council",
+      "answer": "Communiverse Council",
+      "passage": "The Communiverse Council oversees interstellar diplomacy. It meets in the main embassy hall with representatives from many worlds, including Hylurg and Gom. Signals from Earth are routed here before dispatch."
+    },
+    {
+      "id": "glordon",
+      "answer": "Glordon",
+      "passage": "Glordon, the son of Lord Grigon, looks like a potato but is gentle and curious. He dislikes conflict and often accompanies Elio in the corridors of the embassy."
+    },
+    {
+      "id": "keycard",
+      "answer": "Keycard",
+      "passage": "A keycard unlocks secure doors in the Communiverse embassy. Without it, the control room stays sealed, and alarms trigger when doors are forced."
+    },
+    {
+      "id": "wormhole",
+      "answer": "Wormhole",
+      "passage": "Travel between planets uses wormholes. Pilots must align signals with the gate; failure to synchronize causes severe turbulence and delays."
+    }
+  ]
+}

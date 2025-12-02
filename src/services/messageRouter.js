@@ -11,6 +11,7 @@ import { sendAsPersona } from "./webhooks.js";
 import { incCounter } from "../util/metrics.js";
 import * as conversationHistory from "./conversationHistory.js";
 import * as personaSwitcher from "./personaSwitcher.js";
+import { AI_ENABLED } from "../config.js";
 
 // Cooldown tracking (in-memory) - PER USER, not per channel!
 const cooldowns = new Map();
@@ -666,7 +667,9 @@ Provide a helpful, friendly response (1-3 sentences).`;
 async function generateSmartReply(message, decision, services, config) {
   try {
     const { ai } = services;
-    if (!ai) {
+    const logicOnly = !AI_ENABLED;
+
+    if (!ai && !logicOnly) {
       logger.warn("[AUTO-REPLY] AI service not available");
       return null;
     }
@@ -707,8 +710,15 @@ async function generateSmartReply(message, decision, services, config) {
     // 1. Get conversation history for this persona in this channel (fast, in-memory)
     const conversationContext = conversationHistory.getContextString(
       message.channelId,
+      message.author.id,
       selectedPersona.name,
       2 // Reduced from 3 to 2 exchanges for faster processing
+    );
+    const structuredHistory = conversationHistory.getContext(
+      message.channelId,
+      message.author.id,
+      selectedPersona.name,
+      4
     );
 
     if (conversationContext) {
@@ -717,7 +727,7 @@ async function generateSmartReply(message, decision, services, config) {
       logger.debug("[AUTO-REPLY] Using conversation history (skipping RAG for speed)");
     }
     // 2. RAG - ONLY if no conversation history (to reduce latency)
-    else if (config.useRAG && ai.rag && message.content.length > 30) {
+    else if (!logicOnly && config.useRAG && ai?.rag && message.content.length > 30) {
       try {
         logger.debug("[AUTO-REPLY] Querying RAG (no history available)");
 
@@ -745,7 +755,7 @@ async function generateSmartReply(message, decision, services, config) {
 
     // 3. VLM - Describe image if present
     let imageDescription = "";
-    if (decision.hasImage && config.useVLM && ai.vlm) {
+    if (!logicOnly && decision.hasImage && config.useVLM && ai?.vlm) {
       try {
         const attachment = Array.from(message.attachments.values()).find((a) =>
           a.contentType?.startsWith("image/")
@@ -770,6 +780,81 @@ async function generateSmartReply(message, decision, services, config) {
         logger.warn("[AUTO-REPLY] VLM failed", { error: error.message });
         // Continue without VLM context
       }
+    }
+
+    // If logic-only mode, return deterministic reply without AI calls
+    // Prefer non-LLM persona logic service when available
+    if (ai?.personaLogic) {
+      try {
+        const historyPayload = structuredHistory.map((h) => ({
+          role: h.role,
+          content: h.content,
+        }));
+        const logicRes = await ai.personaLogic.reply({
+          persona: selectedPersona.name,
+          message: message.content,
+          history: historyPayload,
+          topK: 5,
+          maxLen: 90,
+        });
+        if (logicRes?.ok && logicRes.data?.text) {
+          const responseText = logicRes.data.text.trim();
+          conversationHistory.addMessage(
+            message.channelId,
+            message.author.id,
+            selectedPersona.name,
+            "user",
+            message.content
+          );
+          conversationHistory.addMessage(
+            message.channelId,
+            message.author.id,
+            selectedPersona.name,
+            "assistant",
+            responseText
+          );
+          personaSwitcher.setActivePersona(message.author.id, message.channelId, selectedPersona.name);
+
+          return {
+            text: responseText,
+            persona: selectedPersona,
+            usedRAG: false,
+            usedVLM: false,
+            usedHistory: structuredHistory.length > 0,
+            strategy: logicRes.data.strategy || "logic",
+          };
+        }
+      } catch (error) {
+        logger.warn("[AUTO-REPLY] Persona logic service failed, falling back", { error: error.message });
+      }
+    }
+
+    if (logicOnly) {
+      const logicReply = buildLogicOnlyReply(message.content, selectedPersona);
+
+      // Track simple history for continuity
+      conversationHistory.addMessage(
+        message.channelId,
+        message.author.id,
+        selectedPersona.name,
+        "user",
+        message.content
+      );
+      conversationHistory.addMessage(
+        message.channelId,
+        message.author.id,
+        selectedPersona.name,
+        "assistant",
+        logicReply
+      );
+
+      return {
+        text: logicReply,
+        persona: selectedPersona,
+        usedRAG: false,
+        usedVLM: false,
+        usedHistory: structuredHistory.length > 0,
+      };
     }
 
     // 4. Generate persona response - OPTIMIZED FOR SPEED
@@ -815,8 +900,20 @@ async function generateSmartReply(message, decision, services, config) {
       responseText = cleanResponseText(responseText, selectedPersona.name);
 
       // Add to PER-PERSONA conversation history
-      conversationHistory.addMessage(message.channelId, selectedPersona.name, 'user', message.content);
-      conversationHistory.addMessage(message.channelId, selectedPersona.name, 'assistant', responseText);
+      conversationHistory.addMessage(
+        message.channelId,
+        message.author.id,
+        selectedPersona.name,
+        "user",
+        message.content
+      );
+      conversationHistory.addMessage(
+        message.channelId,
+        message.author.id,
+        selectedPersona.name,
+        "assistant",
+        responseText
+      );
 
       // Activate conversation mode for this user with this persona
       const userId = message.author.id;
@@ -927,6 +1024,18 @@ function cleanResponseText(text, personaName) {
   }
 
   return cleaned;
+}
+
+function buildLogicOnlyReply(userMessage, persona) {
+  const personaName = persona?.name || "Bot";
+  const trimmed = (userMessage || "").slice(0, 120);
+  const hints = [
+    "AI features are off; running logic-only mode.",
+    "Mini-games and commands are available.",
+    "Try /minigame start to play."
+  ];
+  const hint = hints[Math.floor(Math.random() * hints.length)];
+  return `${personaName}: ${hint}${trimmed ? ` | You said: "${trimmed}"` : ""}`;
 }
 
 // Cooldown helpers

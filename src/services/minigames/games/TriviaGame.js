@@ -1,28 +1,40 @@
 /**
  * services/minigames/games/TriviaGame.js
- * Communiverse lore trivia game - bot can play as opponent
+ * Communiverse lore trivia game - CPU-only, fixed dataset with modes & scoring
  */
 
+import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { logger } from "../../../util/logger.js";
+import { AI_ENABLED } from "../../../config.js";
+
+const require = createRequire(import.meta.url);
+const triviaData = require("../../../../data/minigames/trivia.json");
+const triviaExpanded = require("../../../../data/minigames/trivia-expanded.json");
+
+const ANSWER_COOLDOWN_MS = 1500;
+const FAST_BONUS_MS = 4000;
+const WRONG_PENALTY = 1;
 
 export class TriviaGame extends BaseGame {
   async initialize() {
     await super.initialize();
 
-    // Game-specific settings
     this.gameData = {
       totalQuestions: this.options.rounds || 5,
       currentQuestion: 0,
       questions: [],
-      timeLimit: this.options.timeLimit || 30000, // 30 seconds per question
+      timeLimit: this.options.timeLimit || 30000, // ms
       difficulty: this.options.difficulty || "medium",
+      topic: this.options.topic || "mixed",
+      mode: this.options.mode || "standard", // standard | buzz
       currentQuestionStart: null,
-      answers: new Map(), // Map<userId, answerIndex>
+      answers: new Map(), // userId -> { idx, at }
+      lastAnswerAt: new Map(), // userId -> timestamp
+      scores: new Map(), // userId -> score
     };
 
-    // Add bot as opponent if requested
     if (this.options.vsBot) {
       this.addBotOpponent();
     }
@@ -36,14 +48,14 @@ export class TriviaGame extends BaseGame {
       embeds: [
         {
           title: "🧠 Communiverse Trivia Challenge!",
-          description: `Test your knowledge of the Elio universe!\n\n**Rules:**\n- ${this.gameData.totalQuestions} questions\n- ${this.gameData.timeLimit / 1000} seconds per question\n- Click the correct answer button\n- Fastest correct answer gets bonus points!`,
+          description: `Rules:\n- ${this.gameData.totalQuestions} questions\n- ${this.gameData.timeLimit / 1000}s per question\n- Fast bonus if answered within ${FAST_BONUS_MS / 1000}s\n- Wrong answers: -${WRONG_PENALTY} pt\n- Mode: ${this.gameData.mode === "buzz" ? "Buzz (first correct ends)" : "Standard"}`,
           color: 0x3498db,
           fields: [
             {
               name: "Players",
-              value: this.players.map((p) =>
-                p.isBot ? `🤖 ${p.username}` : `<@${p.userId}>`
-              ).join("\n"),
+              value: this.players
+                .map((p) => (p.isBot ? `🤖 ${p.username}` : `<@${p.userId}>`))
+                .join("\n"),
               inline: false,
             },
           ],
@@ -51,156 +63,27 @@ export class TriviaGame extends BaseGame {
       ],
     });
 
-    // Generate questions
-    await this.generateQuestions();
-
-    // Start first question
-    setTimeout(() => this.askQuestion(), 2000);
+    this.generateQuestions();
+    setTimeout(() => this.askQuestion(), 1500);
   }
 
-  async generateQuestions() {
-    // Use AI service to generate questions from RAG if available
-    if (this.options.aiService?.rag) {
-      await this.generateQuestionsWithRAG();
+  generateQuestions() {
+    const topics = { ...(triviaData?.topics || {}), ...(triviaExpanded?.topics || {}) };
+    let pool = [];
+
+    if (this.gameData.topic === "mixed") {
+      pool = Object.values(topics).flat();
     } else {
-      // Fallback to hardcoded questions
-      this.generateFallbackQuestions();
+      pool = topics[this.gameData.topic] || [];
     }
-  }
 
-  async generateQuestionsWithRAG() {
-    try {
-      const { aiService, guildId } = this.options;
-
-      // Search for diverse lore topics
-      const topics = [
-        "Elio Solis character",
-        "Glordon personality",
-        "Communiverse council",
-        "Lord Grigon villain",
-        "wormhole travel",
-      ];
-
-      for (const topic of topics.slice(0, this.gameData.totalQuestions)) {
-        const ragResult = await aiService.rag.search({
-          query: topic,
-          guildId,
-          topK: 1,
-          generateAnswer: false,
-        });
-
-        if (ragResult.ok && ragResult.data.hits?.length > 0) {
-          const context = ragResult.data.hits[0].chunk;
-
-          // Use LLM to generate a trivia question from the context
-          const llmResult = await aiService.llm.generate(
-            `Based on this information about Elio/Communiverse:\n\n${context}\n\nGenerate a multiple-choice trivia question with 4 options (A, B, C, D). Format:\nQ: [question]\nA) [option 1]\nB) [option 2]\nC) [option 3]\nD) [option 4]\nCorrect: [A/B/C/D]`,
-            { max_length: 200 }
-          );
-
-          if (llmResult.ok) {
-            const question = this.parseGeneratedQuestion(llmResult.data.text);
-            if (question) {
-              this.gameData.questions.push(question);
-            }
-          }
-        }
-      }
-
-      // Fill with fallback if needed
-      while (this.gameData.questions.length < this.gameData.totalQuestions) {
-        this.gameData.questions.push(this.getFallbackQuestion());
-      }
-    } catch (error) {
-      logger.warn("[TRIVIA] RAG generation failed, using fallback", { error: error.message });
-      this.generateFallbackQuestions();
+    if (pool.length === 0) {
+      logger.warn("[TRIVIA] No trivia dataset found, using empty list.");
+      this.gameData.questions = [];
+      return;
     }
-  }
-
-  parseGeneratedQuestion(text) {
-    try {
-      const lines = text.trim().split("\n");
-      const qLine = lines.find((l) => l.startsWith("Q:"));
-      const options = lines.filter((l) => /^[A-D]\)/.test(l));
-      const correctLine = lines.find((l) => l.startsWith("Correct:"));
-
-      if (!qLine || options.length !== 4 || !correctLine) {
-        return null;
-      }
-
-      const question = qLine.replace("Q:", "").trim();
-      const correctAnswer = correctLine.match(/[A-D]/)?.[0];
-
-      if (!correctAnswer) return null;
-
-      return {
-        question,
-        options: options.map((o) => o.replace(/^[A-D]\)\s*/, "").trim()),
-        correctIndex: correctAnswer.charCodeAt(0) - 65, // A=0, B=1, C=2, D=3
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-
-  generateFallbackQuestions() {
-    const questions = [
-      {
-        question: "Who is the main protagonist of Elio?",
-        options: ["Glordon", "Elio Solis", "Lord Grigon", "Olga Solis"],
-        correctIndex: 1,
-      },
-      {
-        question: "What is Glordon's shape often compared to?",
-        options: ["A star", "A potato", "A moon", "A comet"],
-        correctIndex: 1,
-      },
-      {
-        question: "Who is Elio's aunt?",
-        options: ["Major Olga Solis", "Mira", "Questa", "Auva"],
-        correctIndex: 0,
-      },
-      {
-        question: "What is the name of the intergalactic alliance?",
-        options: ["The Federation", "Communiverse", "The Empire", "Galactic Union"],
-        correctIndex: 1,
-      },
-      {
-        question: "Who is the main antagonist of Elio?",
-        options: ["Caleb", "Glordon", "Lord Grigon", "Bryce"],
-        correctIndex: 2,
-      },
-      {
-        question: "What is Caleb's role?",
-        options: ["Warrior", "Chef", "Chauffeur", "Scientist"],
-        correctIndex: 2,
-      },
-      {
-        question: "How do characters travel between planets?",
-        options: ["Rockets", "Wormholes", "Teleportation", "Time travel"],
-        correctIndex: 1,
-      },
-      {
-        question: "What studio produced Elio?",
-        options: ["DreamWorks", "Pixar", "Blue Sky", "Illumination"],
-        correctIndex: 1,
-      },
-    ];
-
-    // Shuffle and pick required number
-    const shuffled = questions.sort(() => Math.random() - 0.5);
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
     this.gameData.questions = shuffled.slice(0, this.gameData.totalQuestions);
-  }
-
-  getFallbackQuestion() {
-    const fallback = [
-      {
-        question: "What year was Elio released?",
-        options: ["2023", "2024", "2025", "2026"],
-        correctIndex: 2,
-      },
-    ];
-    return fallback[0];
   }
 
   async askQuestion() {
@@ -212,9 +95,8 @@ export class TriviaGame extends BaseGame {
     const question = this.gameData.questions[this.gameData.currentQuestion];
     this.gameData.currentQuestionStart = Date.now();
     this.gameData.answers.clear();
+    this.gameData.lastAnswerAt.clear();
 
-    // Build buttons for options
-    const rows = [];
     const buttons = question.options.map((option, idx) =>
       new ButtonBuilder()
         .setCustomId(`trivia_answer_${this.sessionId}_${idx}`)
@@ -222,8 +104,7 @@ export class TriviaGame extends BaseGame {
         .setStyle(ButtonStyle.Primary)
     );
 
-    // Split into rows (max 5 buttons per row, we have 4)
-    rows.push(new ActionRowBuilder().addComponents(buttons));
+    const row = new ActionRowBuilder().addComponents(buttons);
 
     await this.channel.send({
       embeds: [
@@ -231,18 +112,16 @@ export class TriviaGame extends BaseGame {
           title: `❓ Question ${this.gameData.currentQuestion + 1}/${this.gameData.totalQuestions}`,
           description: question.question,
           color: 0xf39c12,
-          footer: { text: `You have ${this.gameData.timeLimit / 1000} seconds to answer!` },
+          footer: { text: `You have ${this.gameData.timeLimit / 1000}s to answer!` },
         },
       ],
-      components: rows,
+      components: [row],
     });
 
-    // Bot answers if playing
     if (this.options.vsBot) {
       setTimeout(() => this.botAnswer(question), Math.random() * 5000 + 2000);
     }
 
-    // Set timeout for question
     this.gameData.questionTimeout = setTimeout(
       () => this.timeoutQuestion(),
       this.gameData.timeLimit
@@ -251,19 +130,14 @@ export class TriviaGame extends BaseGame {
 
   async botAnswer(question) {
     const botPlayer = this.players.find((p) => p.isBot);
-    if (!botPlayer || this.gameData.answers.has(botPlayer.userId)) {
-      return; // Already answered or not playing
-    }
+    if (!botPlayer || this.gameData.answers.has(botPlayer.userId)) return;
 
-    // Bot has 80% chance to get it right (adjustable)
     const botAccuracy = this.options.botDifficulty === "easy" ? 0.6 : 0.8;
     const correctIdx = question.correctIndex;
-
     let answerIdx;
     if (Math.random() < botAccuracy) {
       answerIdx = correctIdx;
     } else {
-      // Pick random wrong answer
       const wrongOptions = [0, 1, 2, 3].filter((i) => i !== correctIdx);
       answerIdx = wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
     }
@@ -272,6 +146,13 @@ export class TriviaGame extends BaseGame {
   }
 
   async submitAnswer(userId, answerIndex) {
+    const now = Date.now();
+    const last = this.gameData.lastAnswerAt.get(userId) || 0;
+    if (now - last < ANSWER_COOLDOWN_MS) {
+      return { ok: false, error: "Too fast. Wait before answering again." };
+    }
+    this.gameData.lastAnswerAt.set(userId, now);
+
     if (this.gameData.answers.has(userId)) {
       return { ok: false, error: "Already answered" };
     }
@@ -284,38 +165,17 @@ export class TriviaGame extends BaseGame {
     const question = this.gameData.questions[this.gameData.currentQuestion];
     const isCorrect = answerIndex === question.correctIndex;
 
-    this.gameData.answers.set(userId, answerIndex);
+    this.gameData.answers.set(userId, { idx: answerIndex, at: now });
 
-    // Calculate points (correct + speed bonus)
-    if (isCorrect) {
-      const timeElapsed = Date.now() - this.gameData.currentQuestionStart;
-      const speedBonus = Math.max(
-        0,
-        Math.floor((this.gameData.timeLimit - timeElapsed) / 1000)
-      );
-      const points = 10 + speedBonus;
-
-      player.score += points;
-
-      if (!player.isBot) {
-        await this.channel.send(
-          `✅ <@${userId}> got it right! +${points} points (${speedBonus} speed bonus)`
-        );
-      } else {
-        await this.channel.send(`🤖 Bot got it right! +${points} points`);
-      }
-    } else {
-      if (!player.isBot) {
-        await this.channel.send(`❌ <@${userId}> got it wrong!`);
-      } else {
-        await this.channel.send(`🤖 Bot got it wrong!`);
-      }
+    if (this.gameData.mode === "buzz" && isCorrect) {
+      clearTimeout(this.gameData.questionTimeout);
+      await this.resolveQuestion(true);
+      return { ok: true, isCorrect, player };
     }
 
-    // Check if all players answered
     if (this.gameData.answers.size >= this.players.length) {
       clearTimeout(this.gameData.questionTimeout);
-      await this.nextQuestion();
+      await this.resolveQuestion(false);
     }
 
     return { ok: true, isCorrect, player };
@@ -336,30 +196,98 @@ export class TriviaGame extends BaseGame {
       ],
     });
 
-    await this.nextQuestion();
+    await this.resolveQuestion(false);
   }
 
-  async nextQuestion() {
+  async resolveQuestion(early = false) {
+    const question = this.gameData.questions[this.gameData.currentQuestion];
+    const correctIdx = question.correctIndex;
+
+    const results = [];
+    for (const [userId, entry] of this.gameData.answers.entries()) {
+      const { idx, at } = entry;
+      const isCorrect = idx === correctIdx;
+      results.push({ userId, answerIndex: idx, isCorrect, at });
+
+      const current = this.gameData.scores.get(userId) || 0;
+      let delta = 0;
+      if (isCorrect) {
+        delta = 2;
+        if (at - this.gameData.currentQuestionStart <= FAST_BONUS_MS) delta += 1;
+      } else {
+        delta = -WRONG_PENALTY;
+      }
+      this.gameData.scores.set(userId, current + delta);
+    }
+
+    await this.channel.send({
+      embeds: [
+        {
+          title: "✅ Answer revealed",
+          description: `Correct answer: **${question.options[correctIdx]}**`,
+          color: 0x2ecc71,
+          fields: results.map((r) => ({
+            name: `<@${r.userId}>`,
+            value: `${r.isCorrect ? "✅ Correct" : "❌ Wrong"} (${question.options[r.answerIndex]})`,
+            inline: false,
+          })),
+        },
+      ],
+    });
+
+    const flavor = await this.generateFlavor(question.question);
+    if (flavor) {
+      await this.channel.send({ content: flavor });
+    }
+
+    if (this.gameData.scores.size > 0) {
+      await this.channel.send({
+        embeds: [
+          {
+            title: "📊 Scoreboard",
+            color: 0x3498db,
+            fields: Array.from(this.gameData.scores.entries())
+              .sort((a, b) => b[1] - a[1])
+              .map(([uid, score]) => ({
+                name: `<@${uid}>`,
+                value: `${score} pts`,
+                inline: true,
+              })),
+          },
+        ],
+      });
+    }
+
     this.gameData.currentQuestion++;
 
     if (this.gameData.currentQuestion >= this.gameData.totalQuestions) {
       await this.endGame();
-    } else {
-      setTimeout(() => this.askQuestion(), 3000);
+      return;
     }
+
+    setTimeout(() => this.askQuestion(), early ? 1500 : 3000);
   }
 
   async endGame() {
-    // Determine winner
-    const sortedPlayers = [...this.players].sort((a, b) => b.score - a.score);
-    this.winner = sortedPlayers[0];
-    this.winner.won = true;
+    const scoreList = Array.from(this.gameData.scores.entries()).sort((a, b) => b[1] - a[1]);
+    const sortedPlayers = scoreList
+      .map(([uid, score]) => {
+        const player = this.players.find((p) => p.userId === uid) || { userId: uid, username: uid };
+        player.score = score;
+        return player;
+      })
+      .sort((a, b) => b.score - a.score);
+
+    this.winner = sortedPlayers[0] || null;
+    if (this.winner) this.winner.won = true;
 
     await this.channel.send({
       embeds: [
         {
           title: "🏆 Trivia Complete!",
-          description: `Winner: ${this.winner.isBot ? "🤖 Bot" : `<@${this.winner.userId}>`}`,
+          description: this.winner
+            ? `Winner: ${this.winner.isBot ? "🤖 Bot" : `<@${this.winner.userId}>`}`
+            : "No winner",
           color: 0x00ff00,
           fields: sortedPlayers.map((p, idx) => ({
             name: `${idx + 1}. ${p.isBot ? "🤖 Bot" : p.username}`,
@@ -373,11 +301,31 @@ export class TriviaGame extends BaseGame {
     await this.end("completed");
   }
 
+  async generateFlavor(seed) {
+    if (!AI_ENABLED) return "";
+    try {
+      const ai = this.options.aiService;
+      if (!ai?.markov) return "";
+      const res = await ai.markov.generate({
+        seed: seed || "trivia",
+        maxLen: 20,
+        temperature: 0.9,
+        repetitionPenalty: 1.2,
+        modelName: "default",
+      });
+      if (res?.ok) {
+        return `_${res.data.text}_`;
+      }
+    } catch (e) {
+      logger.debug("[TRIVIA] Markov flavor failed", { error: e.message });
+    }
+    return "";
+  }
+
   async handleAction(userId, action, data = {}) {
     if (action === "answer") {
       return await this.submitAnswer(userId, data.answerIndex);
     }
-
     return { ok: false, error: "Unknown action" };
   }
 

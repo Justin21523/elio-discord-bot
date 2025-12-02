@@ -1,0 +1,160 @@
+{
+  "topics": {
+    "characters": [
+      {
+        "question": "Who is the child ambassador at the center of the story?",
+        "options": ["Elio Solis", "Glordon", "Caleb", "Lord Grigon"],
+        "correctIndex": 0
+      },
+      {
+        "question": "Which character is Elio's protective aunt?",
+        "options": ["Olga", "Mira", "Questa", "Auva"],
+        "correctIndex": 0
+      },
+      {
+        "question": "Glordon is often compared to which shape?",
+        "options": ["Cube", "Star", "Potato", "Sphere"],
+        "correctIndex": 2
+      },
+      {
+        "question": "Who is known as the ruthless ruler of Hylurg?",
+        "options": ["Questa", "Lord Grigon", "Bryce", "Caleb"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which ambassador is famous for mind-reading empathy?",
+        "options": ["Auva", "Mira", "Questa", "Ooooo"],
+        "correctIndex": 2
+      },
+      {
+        "question": "Which character is a disciplined chauffeur?",
+        "options": ["Caleb", "Elio", "Bryce", "Glordon"],
+        "correctIndex": 0
+      },
+      {
+        "question": "Which character prefers peace and optimism, authoring a universal manual?",
+        "options": ["Auva", "Mira", "Helix", "Turais"],
+        "correctIndex": 0
+      },
+      {
+        "question": "What trait best fits Glordon despite his lineage?",
+        "options": ["Ruthless", "Playful", "Silent", "Arrogant"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Elio's core personality is best described as:",
+        "options": ["Cynical", "Curious and optimistic", "Harsh and cold", "Secretive"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which ambassador is known for strategic cunning?",
+        "options": ["Mira", "Questa", "Auva", "Helix"],
+        "correctIndex": 0
+      }
+    ],
+    "lore": [
+      {
+        "question": "What alliance does Elio communicate with?",
+        "options": ["The Federation", "Communiverse Council", "Outer Rim Pact", "Hylurg Senate"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Travel between planets often relies on what?",
+        "options": ["Teleporters", "Wormholes", "Solar sails", "Ion drives"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which planet is ruled by Lord Grigon?",
+        "options": ["Earth", "Hylurg", "Gom", "Naos"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Who are the typical recipients of Elio's communications?",
+        "options": ["Space pirates", "The Council", "His classmates", "Earth Command"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which ambassador is associated with empathy and close eye contact?",
+        "options": ["Questa", "Mira", "Turais", "Ooooo"],
+        "correctIndex": 0
+      },
+      {
+        "question": "What object allows quick access through secured areas in the embassy?",
+        "options": ["Wormhole pass", "Keycard", "Data shard", "Beacon"],
+        "correctIndex": 1
+      },
+      {
+        "question": "The Communiverse values which principle most?",
+        "options": ["Isolationism", "Shared understanding", "Domination", "Silence"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which entity is known as the liquid supercomputer?",
+        "options": ["Mira", "Helix", "Ooooo", "Questa"],
+        "correctIndex": 2
+      },
+      {
+        "question": "Which mode improves travel readiness but risks attention?",
+        "options": ["Stealth warp", "Broadcast distress", "Silent drift", "Solar glide"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What tone defines most Communiverse diplomatic exchanges?",
+        "options": ["Hostile", "Bureaucratic", "Cooperative", "Silent"],
+        "correctIndex": 2
+      }
+    ],
+    "meta": [
+      {
+        "question": "Which studio produced Elio?",
+        "options": ["DreamWorks", "Pixar", "Sony Animation", "Illumination"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Elio is primarily a story about:",
+        "options": ["Interstellar war", "Found family and belonging", "Time travel paradox", "Sports rivalry"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What genre best fits Elio?",
+        "options": ["Horror", "Sci-fi adventure", "Historical drama", "Romantic comedy"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which year is Elio set to release?",
+        "options": ["2023", "2024", "2025", "2026"],
+        "correctIndex": 2
+      },
+      {
+        "question": "What narrative device frequently appears in Elio?",
+        "options": ["Dream sequences", "Wormholes", "Alternate timelines", "Time loops"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Elio's main emotional arc centers on:",
+        "options": ["Revenge", "Ambition", "Loneliness to connection", "Greed"],
+        "correctIndex": 2
+      },
+      {
+        "question": "Which setting is most iconic to Elio?",
+        "options": ["Ancient Rome", "Communiverse embassy", "Deep ocean base", "Desert planet"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What type of humor is common in Elio's interactions?",
+        "options": ["Slapstick only", "Dry wit and playful banter", "Political satire", "No humor"],
+        "correctIndex": 1
+      },
+      {
+        "question": "A recurring motif in Elio is:",
+        "options": ["Time crystals", "Radios and signals", "Talking animals", "Musical battles"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Which relationship is central to Elio's growth?",
+        "options": ["Rival merchant", "Aunt and nephew", "Coach and trainee", "Detective and suspect"],
+        "correctIndex": 1
+      }
+    ]
+  }
+}

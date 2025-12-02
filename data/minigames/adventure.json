@@ -1,0 +1,82 @@
+{
+  "story": {
+    "start": {
+      "text": "You wake up in a dim corridor of the Communiverse embassy. An alarm blares.",
+      "choices": [
+        { "label": "Run to the control room", "next": "control_room", "reward": 1 },
+        { "label": "Hide in storage", "next": "storage", "reward": 0 }
+      ]
+    },
+    "control_room": {
+      "text": "The control room is locked. A keypad blinks.",
+      "choices": [
+        { "label": "Hack the keypad", "next": "hack", "requires": { "item": "Keycard" }, "reward": 2 },
+        { "label": "Force the door", "next": "force", "penalty": 1 }
+      ]
+    },
+    "storage": {
+      "text": "Storage is dark, but you find a glowing crate.",
+      "choices": [
+        { "label": "Open the crate", "next": "crate", "reward": 1 },
+        { "label": "Sneak away", "next": "sneak", "reward": 0 }
+      ]
+    },
+    "hack": {
+      "text": "The door opens quietly. Inside, you see the navigation console.",
+      "choices": [
+        { "label": "Set course to Earth", "next": "earth", "reward": 3 },
+        { "label": "Broadcast distress", "next": "distress", "reward": 2 }
+      ]
+    },
+    "force": {
+      "text": "You slam the door. Noise echoes; guards approach.",
+      "choices": [
+        { "label": "Fight them", "next": "fight", "penalty": 2 },
+        { "label": "Surrender", "next": "surrender", "reward": 0 }
+      ]
+    },
+    "crate": {
+      "text": "Inside is a Keycard. Useful!",
+      "choices": [
+        { "label": "Take keycard and return", "next": "control_room", "reward": 2, "grant": "Keycard" }
+      ]
+    },
+    "sneak": {
+      "text": "You sneak to the hangar; a shuttle is prepping.",
+      "choices": [
+        { "label": "Board the shuttle", "next": "shuttle", "reward": 2 },
+        { "label": "Sabotage engines", "next": "sabotage", "penalty": 1 }
+      ]
+    },
+    "earth": {
+      "text": "Course locked to Earth. The ship jumps to safety. You win!",
+      "end": "success",
+      "reward": 5
+    },
+    "distress": {
+      "text": "The signal is sent. Allies arrive and secure the embassy.",
+      "end": "success",
+      "reward": 4
+    },
+    "fight": {
+      "text": "You are overwhelmed by guards. Captured.",
+      "end": "fail",
+      "penalty": 3
+    },
+    "surrender": {
+      "text": "They detain you but later release you; the threat passes. Partial success.",
+      "end": "partial",
+      "reward": 1
+    },
+    "shuttle": {
+      "text": "You board and escape as alarms ring. Success!",
+      "end": "success",
+      "reward": 4
+    },
+    "sabotage": {
+      "text": "Engines explode; you’re caught in the blast. Fail.",
+      "end": "fail",
+      "penalty": 3
+    }
+  }
+}

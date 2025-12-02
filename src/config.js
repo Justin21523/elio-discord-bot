@@ -34,6 +34,11 @@ if (!MONGODB_URI) {
 // AI Configuration
 // ============================================================================
 export const AI_ENABLED = process.env.AI_ENABLED === "true";
+export const AI_MOCK_MODE = process.env.AI_MOCK_MODE === "true";
+export const AI_MOCK_LATENCY_MS = parseInt(
+  process.env.AI_MOCK_LATENCY_MS || "0",
+  10
+);
 export const AI_MODEL_TEXT = process.env.AI_MODEL_TEXT || "deepseek";
 export const AI_MODEL_VLM = process.env.AI_MODEL_VLM || "qwen-vl";
 export const EMBEDDINGS_MODEL = process.env.EMBEDDINGS_MODEL || "bge-m3";
@@ -111,6 +116,22 @@ export const CONVERSATION_MAX_TURNS = parseInt(
 );
 
 // ============================================================================
+// Channel History Configuration
+// ============================================================================
+export const CHANNEL_HISTORY_ENABLED =
+  process.env.CHANNEL_HISTORY_ENABLED !== "false";
+export const CHANNEL_HISTORY_CRON =
+  process.env.CHANNEL_HISTORY_CRON || "0 */6 * * *"; // Every 6 hours
+export const CHANNEL_HISTORY_MAX_DAYS = parseInt(
+  process.env.CHANNEL_HISTORY_MAX_DAYS || "7",
+  10
+);
+export const CHANNEL_HISTORY_RETENTION_DAYS = parseInt(
+  process.env.CHANNEL_HISTORY_RETENTION_DAYS || "90",
+  10
+);
+
+// ============================================================================
 // Feature Flags
 // ============================================================================
 export const FEATURES = {
@@ -118,6 +139,7 @@ export const FEATURES = {
   WEB_SEARCH_ENABLED,
   KEYWORD_TRIGGERS: process.env.KEYWORD_TRIGGERS_ENABLED === "true",
   NSFW_FILTER: process.env.NSFW_FILTER_ENABLED !== "false", // default true
+  CHANNEL_HISTORY: CHANNEL_HISTORY_ENABLED,
 };
 
 // ============================================================================
@@ -166,6 +188,14 @@ export const config = {
   // Scheduler
   scheduler: {
     newsDigestCron: process.env.NEWS_DIGEST_CRON || "0 13 * * *",
+  },
+
+  // Channel History
+  channelHistory: {
+    enabled: CHANNEL_HISTORY_ENABLED,
+    cron: CHANNEL_HISTORY_CRON,
+    maxDays: CHANNEL_HISTORY_MAX_DAYS,
+    retentionDays: CHANNEL_HISTORY_RETENTION_DAYS,
   },
 
   // Observability

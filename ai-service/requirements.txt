@@ -41,6 +41,7 @@ pymongo>=4.6.0
 # Vector Search
 faiss-cpu>=1.8.0
 numpy>=1.26.0,<2.0.0
+scikit-learn>=1.4.0  # for recommender / CPU analytics
 
 # BM25 Search
 rank-bm25>=0.2.2

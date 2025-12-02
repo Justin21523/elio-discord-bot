@@ -1,0 +1,56 @@
+{
+  "states": {
+    "start": {
+      "text": "You stand at the embassy atrium. A faint alarm echoes.",
+      "transitions": {
+        "investigate": 0.4,
+        "hide": 0.3,
+        "call_help": 0.3
+      }
+    },
+    "investigate": {
+      "text": "You approach the control corridor; footsteps ahead.",
+      "transitions": {
+        "confront": 0.5,
+        "sneak": 0.5
+      }
+    },
+    "hide": {
+      "text": "You duck behind a crate. Shadows move past.",
+      "transitions": {
+        "sneak": 0.6,
+        "wait": 0.4
+      }
+    },
+    "call_help": {
+      "text": "You broadcast a distress signal on all channels.",
+      "transitions": {
+        "ally_arrives": 0.5,
+        "no_response": 0.5
+      }
+    },
+    "confront": {
+      "text": "You confront the intruders—they seem confused.",
+      "end": "partial"
+    },
+    "sneak": {
+      "text": "You slip through service ducts toward the hangar.",
+      "end": "success"
+    },
+    "wait": {
+      "text": "You wait quietly, but alarms intensify.",
+      "end": "fail"
+    },
+    "ally_arrives": {
+      "text": "An ally ship docks; backup secures the area.",
+      "end": "success"
+    },
+    "no_response": {
+      "text": "Silence. You are on your own.",
+      "transitions": {
+        "investigate": 0.5,
+        "hide": 0.5
+      }
+    }
+  }
+}

@@ -321,6 +321,52 @@ Use this table during load tests:
 
 ---
 
+## 2025-11-29 遠端部署紀錄（CPU / Mock 模式）
+
+* 主機：`live.dothost.net:2965`，使用者 `neojustin`，已安裝 Docker / docker-compose 1.29。
+* 專案：同步至 `~/elio-discord-bot`，`Dockerfile` 改為無 lockfile 時使用 `npm install --omit=dev`；`docker-compose.yml` 默認 CPU 版（Mongo+Bot），AI 服務改為 profile 可選。
+* 環境：`.env` 已填 Discord 憑證，`AI_MOCK_MODE=true`、`AI_MOCK_LATENCY_MS=0`；`ai-service/.env` 關閉所有模型預載與 8/4bit，未啟動 AI 服務（主機無 NVIDIA GPU）。
+* 執行：`sudo docker-compose up -d mongo` 後，使用 `sudo docker-compose up --no-deps -d bot` 啟動 bot。Bot 已登入 Discord（Elio Bot#4398），服務 3 個 guild。
+* 狀態與操作：`sudo docker-compose logs -f bot` 查看日誌；停止 `sudo docker-compose stop bot`（或 `down` 停止全部）。
+
+### 2025-11-29 部署修復紀錄
+
+**環境升級：**
+* 升級 Node.js 至 v20（遠端原為舊版，不支援 `??=` 語法）
+* 升級 docker-compose 至 v2.24.0（解決 `ContainerConfig` 相容性問題）
+
+**程式碼修復：**
+| 檔案 | 問題 | 修復 |
+|------|------|------|
+| `src/services/scheduler.js:277` | 重複宣告 `maintenanceJobs` | 移除重複的 `const` |
+| `src/services/minigames/GameManager.js:18` | import 路徑錯誤 | `../config/` → `../../config/` |
+| `src/services/minigames/games/IRClueGame.js:55` | `handleClue` 缺少 `async` | 新增 `async` |
+| `src/services/minigames/games/IRDocHuntGame.js:54` | `handleQuery` 缺少 `async` | 新增 `async` |
+| `scripts/deploy-commands.js` | 缺少指令定義 | 新增 `minigame`、`loot`、`inventory` |
+| `data/training/final-complete-training-data.jsonl:1530` | JSON 格式錯誤 | 修復缺少換行符 |
+
+**部署腳本：**
+* 新增 `scripts/deploy-remote.sh`（已加入 `.gitignore`）
+
+**Slash 指令部署：**
+* Guild 指令（立即生效）：`npm run deploy:dev`
+* 全域指令（約1小時生效）：`npm run deploy:global`
+
+---
+
+## TODO（功能完成後一次部署）
+
+- [x] 本地 `npm install` 並跑 `npm test`（2/3 通過，GuessNumber 有 cooldown 問題）
+- [x] Python persona logic 測試通過（`pytest ai-service/tests/test_persona_logic.py`）
+- [x] 重新同步程式到遠端，使用 CPU 預設 compose（AI profile 可選）
+- [x] 重新部署 slash 指令（新增 minigame/loot/inventory 子指令）
+- [ ] 全域部署 slash 指令（`npm run deploy:global`）
+- [ ] 手動驗證：猜數字、擲骰、固定題庫 trivia、DM/thread scope；`/loot pull|inventory|achievements|leaderboard`、`/inventory use`
+- [ ] 新遊戲驗證：分支冒險（投票，Markov 敘事）、進階 trivia（topic/mode/排行榜 + Markov）、回合制戰鬥（Battle，Markov 敘事）、背包道具整合、Python 推薦/Markov API
+- [ ] 排程驗證：metrics / reset-leaderboard / reset-achievements（`npm run cron:maintenance` 或外部 cron）
+
+---
+
 ## ✅ Production Readiness Checklist
 
 **Health**

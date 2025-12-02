@@ -1,0 +1,65 @@
+{
+  "topics": {
+    "characters": [
+      {
+        "question": "Who is the main protagonist of Elio?",
+        "options": ["Glordon", "Elio Solis", "Lord Grigon", "Olga Solis"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What is Glordon's shape often compared to?",
+        "options": ["A star", "A potato", "A moon", "A comet"],
+        "correctIndex": 1
+      },
+      {
+        "question": "Who is Elio's aunt?",
+        "options": ["Major Olga Solis", "Mira", "Questa", "Auva"],
+        "correctIndex": 0
+      },
+      {
+        "question": "Who is the main antagonist of Elio?",
+        "options": ["Caleb", "Glordon", "Lord Grigon", "Bryce"],
+        "correctIndex": 2
+      },
+      {
+        "question": "What is Caleb's role?",
+        "options": ["Warrior", "Chef", "Chauffeur", "Scientist"],
+        "correctIndex": 2
+      },
+      {
+        "question": "Which ambassador is known for mind-reading empathy?",
+        "options": ["Questa", "Mira", "Auva", "Ooooo"],
+        "correctIndex": 0
+      }
+    ],
+    "lore": [
+      {
+        "question": "What is the name of the intergalactic alliance?",
+        "options": ["The Federation", "Communiverse", "The Empire", "Galactic Union"],
+        "correctIndex": 1
+      },
+      {
+        "question": "How do characters travel between planets?",
+        "options": ["Rockets", "Wormholes", "Teleportation", "Time travel"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What is the typical destination Elio communicates with?",
+        "options": ["The Council", "The Federation", "The Empire", "The League"],
+        "correctIndex": 0
+      }
+    ],
+    "meta": [
+      {
+        "question": "What studio produced Elio?",
+        "options": ["DreamWorks", "Pixar", "Blue Sky", "Illumination"],
+        "correctIndex": 1
+      },
+      {
+        "question": "What year was Elio released?",
+        "options": ["2023", "2024", "2025", "2026"],
+        "correctIndex": 2
+      }
+    ]
+  }
+}

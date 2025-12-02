@@ -1,0 +1,24 @@
+{
+  "documents": [
+    {
+      "id": "embassy",
+      "answer": "Communiverse Embassy",
+      "text": "The Communiverse Embassy houses the council chamber and secure control room. Signals are routed through the main hall, and only ambassadors with keycards may enter the control room."
+    },
+    {
+      "id": "glordon",
+      "answer": "Glordon",
+      "text": "Glordon is the potato-shaped son of Lord Grigon. Despite his lineage, he is gentle and prefers exploration over conflict, often roaming the corridors with Elio."
+    },
+    {
+      "id": "wormhole",
+      "answer": "Wormhole Gate",
+      "text": "Interstellar travel uses wormhole gates. Pilots must synchronize navigation signals; failure causes turbulence. The gate network connects Earth, Hylurg, and Gom."
+    },
+    {
+      "id": "keycard",
+      "answer": "Keycard",
+      "text": "A keycard unlocks restricted doors inside the embassy. Forcing doors triggers alarms and security drones, but a valid keycard silently opens the control room."
+    }
+  ]
+}

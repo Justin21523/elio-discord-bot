@@ -108,6 +108,30 @@ export async function ensureIndexes() {
   await db.collection('dm_sessions').createIndex({ userId: 1, active: 1 });
   await db.collection('dm_sessions').createIndex({ createdAt: -1 });
 
+  // channel_messages: Discord history storage
+  await db.collection('channel_messages').createIndex({ messageId: 1 }, { unique: true });
+  await db.collection('channel_messages').createIndex({ guildId: 1, channelId: 1, timestamp: -1 });
+  await db.collection('channel_messages').createIndex({ authorId: 1, timestamp: -1 });
+  await db.collection('channel_messages').createIndex({ timestamp: -1 });
+  await db.collection('channel_messages').createIndex({ trainingEligible: 1, optedOut: 1 });
+  await db.collection('channel_messages').createIndex({ ingestedAt: -1 });
+  // Text search for message content
+  await db.collection('channel_messages').createIndex(
+    { content: 'text', cleanContent: 'text' },
+    { name: 'channel_messages_text_idx' }
+  );
+  // TTL index for automatic cleanup (90 days retention)
+  const RETENTION_DAYS = parseInt(process.env.CHANNEL_HISTORY_RETENTION_DAYS || '90', 10);
+  await db.collection('channel_messages').createIndex(
+    { ingestedAt: 1 },
+    { expireAfterSeconds: RETENTION_DAYS * 24 * 60 * 60, name: 'channel_messages_ttl' }
+  );
+
+  // privacy_settings: user opt-out preferences
+  await db.collection('privacy_settings').createIndex({ userId: 1 }, { unique: true });
+  await db.collection('privacy_settings').createIndex({ userId: 1, guildId: 1 });
+  await db.collection('privacy_settings').createIndex({ requestedDeletion: 1 });
+
   console.log(`[JOB] indexes ensured (validators ${validatorsApplied ? "applied" : "skipped"})`);
   await client.close();
 }

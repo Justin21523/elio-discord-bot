@@ -1,0 +1,18 @@
+{
+  "rarities": [
+    { "name": "Common", "weight": 65, "reward": 5 },
+    { "name": "Rare", "weight": 25, "reward": 15 },
+    { "name": "Epic", "weight": 8, "reward": 40 },
+    { "name": "Legendary", "weight": 2, "reward": 100 }
+  ],
+  "items": [
+    { "name": "Cosmic Sticker", "rarity": "Common" },
+    { "name": "Glordon Snack", "rarity": "Common" },
+    { "name": "Elio Badge", "rarity": "Rare" },
+    { "name": "Council Token", "rarity": "Rare" },
+    { "name": "Wormhole Keycard", "rarity": "Epic" },
+    { "name": "Hylurg Relic", "rarity": "Epic" },
+    { "name": "Communiverse Crown", "rarity": "Legendary" },
+    { "name": "Starship Blueprint", "rarity": "Legendary" }
+  ]
+}

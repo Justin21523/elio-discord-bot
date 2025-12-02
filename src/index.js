@@ -5,8 +5,8 @@
  */
 
 import { Client, GatewayIntentBits, Events, Collection, Partials } from "discord.js";
-import { config, validateConfig } from "./config.js";
-import { connectDB, closeDB } from "./db/mongo.js";
+import { config, validateConfig, CHANNEL_HISTORY_ENABLED } from "./config.js";
+import { connectDB, closeDB, getDb } from "./db/mongo.js";
 import { logger } from "./util/logger.js";
 import { bootFromDb as bootScheduler } from "./services/scheduler.js";
 import { incCounter, observeHistogram } from "./util/metrics.js";
@@ -41,6 +41,10 @@ import * as finetuneCmd from "./commands/finetune.js";
 import * as configProactiveCmd from "./commands/config-proactive.js";
 import * as minigameCmd from "./commands/minigame.js";
 import * as adminDataCmd from "./commands/admin-data.js";
+import * as lootCmd from "./commands/loot.js";
+import * as inventoryCmd from "./commands/inventory.js";
+import * as historyCmd from "./commands/history.js";
+import * as privacyCmd from "./commands/privacy.js";
 
 // Import event handlers
 import * as messageCreateEvent from "./events/messageCreate.js";
@@ -58,6 +62,7 @@ import * as autoPersonaChat from "./jobs/autoPersonaChat.js";
 import * as autoMiniGame from "./jobs/autoMiniGame.js";
 import * as autoStoryWeave from "./jobs/autoStoryWeave.js";
 import * as autoWorldBuilder from "./jobs/autoWorldBuilder.js";
+import { createChannelHistorySyncJob } from "./jobs/channelHistorySync.js";
 
 // Validate configuration on startup
 try {
@@ -126,6 +131,10 @@ function buildRouter() {
     configProactiveCmd,
     minigameCmd,
     adminDataCmd,
+    lootCmd,
+    inventoryCmd,
+    historyCmd,
+    privacyCmd,
   ];
 
   for (const cmd of commands) {
@@ -230,7 +239,16 @@ function registerCronJobs() {
     autoWorldBuilder.run(client).catch((err) => logger.error("[CRON] auto_world_builder failed", err));
   });
 
-  logger.info("[BOT] Registered 11 cron jobs (including 5 proactive AI features)");
+  // Channel history sync (every 6 hours) - if enabled
+  if (CHANNEL_HISTORY_ENABLED) {
+    const db = getDb();
+    const historyJob = createChannelHistorySyncJob(client, db, ai.client);
+    if (historyJob) {
+      logger.info("[CRON] Channel history sync job registered");
+    }
+  }
+
+  logger.info("[BOT] Registered 12 cron jobs (including 5 proactive AI features + channel history)");
 }
 
 // 7) Message handler (for both guild messages and DMs)
@@ -246,6 +264,7 @@ client.on(Events.MessageCreate, async (message) => {
       webhooks,
       conversationHistory,
       ai,
+      db: getDb(),
     };
 
     // Route to appropriate handler based on message type
@@ -285,6 +304,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         webhooks,
         conversationHistory,
         ai,
+        db: getDb(),
       };
 
       await command.execute(interaction, services);
