@@ -118,4 +118,55 @@ export const validators = {
       additionalProperties: true,
     },
   },
+
+  // --- channel_messages (Discord history) ---
+  channel_messages: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['messageId', 'guildId', 'channelId', 'authorId', 'content', 'timestamp'],
+      properties: {
+        messageId: { bsonType: 'string' },           // Discord message ID (unique)
+        guildId: { bsonType: 'string' },             // Discord guild ID
+        channelId: { bsonType: 'string' },           // Discord channel ID
+        authorId: { bsonType: 'string' },            // Discord user ID
+        authorTag: { bsonType: ['string', 'null'] }, // user#discriminator
+        authorName: { bsonType: ['string', 'null'] },// Display name
+        content: { bsonType: 'string' },             // Message content
+        cleanContent: { bsonType: ['string', 'null'] }, // Cleaned content (mentions resolved)
+        timestamp: { bsonType: 'date' },             // Message creation time
+        editedTimestamp: { bsonType: ['date', 'null'] }, // Last edit time
+        attachments: { bsonType: 'array' },          // Attachment URLs
+        embeds: { bsonType: 'array' },               // Embeds data
+        referencedMessageId: { bsonType: ['string', 'null'] }, // Reply reference
+        embedding: { bsonType: ['array', 'null'] },  // Vector embedding for RAG
+        embeddingModel: { bsonType: ['string', 'null'] }, // Model used for embedding
+        optedOut: { bsonType: 'bool' },              // User opted out of data collection
+        redacted: { bsonType: 'bool' },              // Content was redacted
+        trainingEligible: { bsonType: 'bool' },      // Eligible for ML training
+        ingestedAt: { bsonType: 'date' },            // When this was ingested
+        updatedAt: { bsonType: ['date', 'null'] },
+      },
+      additionalProperties: true,
+    },
+  },
+
+  // --- privacy_settings (user opt-out preferences) ---
+  privacy_settings: {
+    $jsonSchema: {
+      bsonType: 'object',
+      required: ['userId', 'optOutHistory', 'optOutTraining'],
+      properties: {
+        userId: { bsonType: 'string' },              // Discord user ID
+        guildId: { bsonType: ['string', 'null'] },   // Optional: guild-specific
+        optOutHistory: { bsonType: 'bool' },         // Opt out of history collection
+        optOutTraining: { bsonType: 'bool' },        // Opt out of ML training
+        optOutEmbeddings: { bsonType: 'bool' },      // Opt out of embeddings
+        requestedDeletion: { bsonType: 'bool' },     // Requested data deletion
+        deletionRequestedAt: { bsonType: ['date', 'null'] },
+        createdAt: { bsonType: 'date' },
+        updatedAt: { bsonType: ['date', 'null'] },
+      },
+      additionalProperties: true,
+    },
+  },
 };

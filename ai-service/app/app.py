@@ -35,6 +35,12 @@ from app.api.routers import (
     finetuning_router,
     moderation_router,
     persona_router,
+    markov_router,
+    recs_router,
+    ir_router,
+    persona_logic_router,
+    hybrid_router,
+    game_ai_router,
 )
 
 # Setup logging
@@ -213,6 +219,12 @@ app.include_router(story_router.router, prefix="/story", tags=["Story"])
 app.include_router(finetuning_router.router, prefix="/finetune", tags=["Finetuning"])
 app.include_router(moderation_router.router, prefix="/moderation", tags=["Moderation"])
 app.include_router(persona_router.router, prefix="/persona", tags=["Persona"])
+app.include_router(persona_logic_router.router, tags=["Persona-Logic"])
+app.include_router(hybrid_router.router, tags=["Hybrid"])
+app.include_router(markov_router.router, prefix="/markov", tags=["Markov"])
+app.include_router(recs_router.router, prefix="/recs", tags=["Recs"])
+app.include_router(ir_router.router, prefix="/ir", tags=["IR"])
+app.include_router(game_ai_router.router, tags=["Game-AI"])
 
 
 # ------------------------------

@@ -8,9 +8,11 @@ import cron from "node-cron";
 import { getDb as getDB } from "../db/mongo.js";
 import { logger } from "../util/logger.js";
 import { ErrorCodes as ErrorCode } from "../config.js";
+import { spawn } from "child_process";
 
 // Active cron jobs keyed by {guildId}_{kind}
 const activeJobs = new Map();
+const maintenanceJobs = [];
 
 /**
  * Boot scheduler from database
@@ -37,6 +39,8 @@ export async function bootFromDb() {
     }
 
     logger.job("Scheduler booted from DB", { total: schedules.length, armed });
+    // Also arm maintenance cron (metrics/leaderboard/achievements) if not already
+    armMaintenance();
     return { ok: true, data: { total: schedules.length, armed } };
   } catch (error) {
     logger.error("Failed to boot scheduler", { error: error.message });
@@ -226,10 +230,11 @@ export async function reloadForGuild(guildId) {
  */
 function getDefaultHandler(kind) {
   // Import handlers dynamically to avoid circular dependencies
+  if (kind === "maintenance") {
+    return async () => runScript("npm", ["run", "cron:maintenance"]);
+  }
   return async ({ guildId, channelId }) => {
     logger.job(`Default handler for ${kind}`, { guildId, channelId });
-    // Handler implementation will be added per phase
-    // For now, just log
   };
 }
 
@@ -254,5 +259,34 @@ let _client = null;
 function setClient(client) {
   _client = client;
 }
+
+function runScript(cmd, args) {
+  return new Promise((resolve) => {
+    const { spawn } = require("child_process");
+    const p = spawn(cmd, args, { stdio: "inherit" });
+    p.on("close", (code) => {
+      if (code !== 0) {
+        logger.error("[CRON] job failed", { cmd, args, code });
+      }
+      resolve();
+    });
+  });
+}
+
+// Arm maintenance on module load
+function armMaintenance() {
+  if (maintenanceJobs.length > 0) return;
+  maintenanceJobs.push(
+    cron.schedule("0 2 * * *", () => runScript("npm", ["run", "metrics"]))
+  );
+  maintenanceJobs.push(
+    cron.schedule("0 3 * * 0", () => runScript("npm", ["run", "reset:leaderboard"]))
+  );
+  maintenanceJobs.push(
+    cron.schedule("15 3 * * 0", () => runScript("npm", ["run", "reset:achievements"]))
+  );
+  logger.info("[CRON] Maintenance jobs armed");
+}
+armMaintenance();
 
 export default { setClient, arm, disarm, bootFromDb, reloadForGuild, getActiveJobs };

@@ -5,6 +5,8 @@
 
 import { BaseGame } from "../BaseGame.js";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { AI_ENABLED } from "../../../config.js";
+import { logEvent } from "../../analytics/events.js";
 
 export class ReactionGame extends BaseGame {
   async initialize() {
@@ -26,11 +28,13 @@ export class ReactionGame extends BaseGame {
     this.status = "active";
     this.startedAt = Date.now();
 
+    const flavor = await this.generateFlavor("reaction start");
+
     await this.channel.send({
       embeds: [
         {
           title: "⚡ Reaction Speed Challenge!",
-          description: `Click the button as fast as you can when it appears!\n\n**${this.gameData.rounds}** rounds`,
+          description: `Click the button as fast as you can when it appears!\n\n**${this.gameData.rounds}** rounds${flavor ? `\n\n${flavor}` : ""}`,
           color: 0xe74c3c,
         },
       ],
@@ -82,6 +86,14 @@ export class ReactionGame extends BaseGame {
       this.gameData.reactionTimes.set(userId, times);
 
       await this.channel.send(`<@${userId}> reacted in **${reactionTime}ms**!`);
+      await logEvent({
+        userId,
+        username: userId,
+        guildId: this.options.guildId,
+        gameType: "reaction",
+        action: "click",
+        meta: { reactionTime, round: this.gameData.currentRound + 1 },
+      });
 
       // Check if all players clicked
       if (this.gameData.clicked.size >= this.players.length) {
@@ -127,6 +139,25 @@ export class ReactionGame extends BaseGame {
 
   getGameName() {
     return "Reaction Speed";
+  }
+
+  async generateFlavor(seed) {
+    if (!AI_ENABLED) return "";
+    try {
+      const ai = this.options.aiService;
+      if (!ai?.markov) return "";
+      const res = await ai.markov.generate({
+        seed,
+        maxLen: 15,
+        temperature: 0.9,
+        repetitionPenalty: 1.2,
+        modelName: "default",
+      });
+      if (res?.ok) return `_${res.data.text}_`;
+    } catch (e) {
+      // ignore
+    }
+    return "";
   }
 }
 

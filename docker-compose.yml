@@ -1,7 +1,6 @@
 # ============================================================================
-# Elioverse Bot - Docker Compose Configuration
-# Services: Discord Bot + Python AI Service + MongoDB
-# GPU Support: NVIDIA RTX 5080 with CUDA 12.8
+# Elioverse Bot - Docker Compose (CPU-first)
+# Default: Mongo + Bot (AI disabled). Optional: enable Python AI service via profile.
 # ============================================================================
 
 services:
@@ -30,9 +29,63 @@ services:
       start_period: 20s
 
   # -------------------------
-  # Python AI Service (GPU-enabled, Optimized)
+  # Discord Bot Service (CPU / logic-only by default)
+  # -------------------------
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # MongoDB
+      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
+      DB_NAME: ${DB_NAME:-communiverse_bot}
+
+      # AI (off by default; enable with profile + env)
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://localhost:8000}
+      AI_ENABLED: ${AI_ENABLED:-false}
+
+      # Bot config
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=2048
+
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data:ro
+    networks:
+      - elioverse-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 3G
+        reservations:
+          cpus: "1"
+          memory: 1G
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('net').connect(443,'discord.com').on('connect',()=>{console.log('ok');process.exit(0)}).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # -------------------------
+  # Optional: Python AI Service (GPU). Enable with: docker-compose --profile ai up -d ai-service bot
   # -------------------------
   ai-service:
+    profiles: ["ai"]
     build:
       context: ./ai-service
       dockerfile: Dockerfile
@@ -46,153 +99,59 @@ services:
     env_file:
       - ./ai-service/.env
     environment:
-      # MongoDB connection
       MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
       MONGODB_DB: ${DB_NAME:-communiverse_bot}
-
-      # GPU configuration (Optimized for RTX 5080)
       CUDA_VISIBLE_DEVICES: 0
-      # CUDA memory optimization: prevent fragmentation, limit max split
       PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:256,expandable_segments:True
       TORCH_DTYPE: float16
-      USE_8BIT: "true"   # Use 8-bit quantization (original config)
-      USE_4BIT: "false"  # Disable 4-bit quantization
-
-      # Fine-tuned model (user's custom model)
+      USE_8BIT: "true"
+      USE_4BIT: "false"
       FINETUNED_MODEL_ENABLED: "true"
       FINETUNED_BASE_MODEL: "deepseek-ai/deepseek-llm-7b-chat"
       FINETUNED_ADAPTER_PATH: "/app/models/sft_lora_balanced"
       FINETUNED_USE_FOR_PERSONAS: "true"
-
-      # Service configuration
       HOST: 0.0.0.0
       PORT: 8000
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      MAX_MEMORY_GB: 12  # Reduced from 16 to leave room for system
-
-      # Model preloading (Original config with 8-bit quantization)
-      PRELOAD_EMBEDDINGS: "true"   # Critical for RAG - ~2GB
-      PRELOAD_LLM: "true"          # Preload with 8-bit (~7GB) - original config
-      PRELOAD_VLM: "false"         # VLM loaded on-demand only
-
-      # Performance tuning
-      MAX_BATCH_SIZE: 4            # Reduced from 8 to save memory
-      GENERATION_TIMEOUT: 45       # Reduced from 60s
-      MODEL_LOAD_TIMEOUT: 240      # Reduced from 300s
-
-      # Rate limiting
+      MAX_MEMORY_GB: 12
+      PRELOAD_EMBEDDINGS: "true"
+      PRELOAD_LLM: "true"
+      PRELOAD_VLM: "false"
+      MAX_BATCH_SIZE: 4
+      GENERATION_TIMEOUT: 45
+      MODEL_LOAD_TIMEOUT: 240
       RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_REQUESTS: 50      # Reduced from 100 for stability
+      RATE_LIMIT_REQUESTS: 50
       RATE_LIMIT_WINDOW: 60
-
     volumes:
-      # Mount shared AI warehouse (host path -> container path)
-      - /mnt/c/AI_LLM_projects/ai_warehouse:/mnt/ai_warehouse:ro  # Read-only for safety
-
-      # Mount fine-tuned models directory
-      - ./models:/app/models:ro  # Read-only
-
-      # Mount logs directory
+      - /mnt/c/ai_models:/mnt/ai_models:ro
+      - ./models:/app/models:ro
       - ./ai-service/logs:/app/logs
-
     networks:
       - elioverse-network
-
-    # GPU access with memory limits
     deploy:
       resources:
         limits:
-          cpus: '4'              # Limit CPU to 4 cores
-          memory: 16G            # Limit system memory
+          cpus: "4"
+          memory: 16G
         reservations:
-          cpus: '2'              # Reserve 2 cores minimum
-          memory: 8G             # Reserve 8GB minimum
+          cpus: "2"
+          memory: 8G
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 90s  # Increased for model preloading
+      start_period: 90s
 
-  # -------------------------
-  # Discord Bot Service (Optimized)
-  # -------------------------
-  bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    depends_on:
-      mongo:
-        condition: service_healthy
-      ai-service:
-        condition: service_healthy  # Wait for AI service to be fully ready
-    env_file:
-      - .env
-    environment:
-      # MongoDB connection
-      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
-      DB_NAME: ${DB_NAME:-communiverse_bot}
-
-      # AI Service connection
-      AI_SERVICE_URL: http://ai-service:8000
-      AI_ENABLED: true
-
-      # Bot configuration
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      NODE_ENV: production
-
-      # Memory optimization
-      NODE_OPTIONS: --max-old-space-size=2048
-
-    volumes:
-      # Mount logs directory
-      - ./logs:/app/logs
-
-      # Mount data directory (read-only for safety)
-      - ./data:/app/data:ro
-
-    networks:
-      - elioverse-network
-
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '2'              # Limit CPU to 2 cores
-          memory: 3G             # Limit memory to 3GB
-        reservations:
-          cpus: '1'              # Reserve 1 core minimum
-          memory: 1G             # Reserve 1GB minimum
-
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('net').connect(443,'discord.com').on('connect',()=>{console.log('ok');process.exit(0)}).on('error',()=>process.exit(1))",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s  # Increased for AI service dependency
-
-# -------------------------
-# Networks
-# -------------------------
 networks:
   elioverse-network:
     driver: bridge
 
-# -------------------------
-# Volumes
-# -------------------------
 volumes:
   mongo_data:
     driver: local

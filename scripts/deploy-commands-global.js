@@ -501,6 +501,190 @@ const commands = [
       },
     ],
   },
+
+  // Mini-game System
+  {
+    name: "minigame",
+    description: "Play mini-games with Communiverse characters",
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "start",
+        description: "Start a mini-game",
+        options: [
+          {
+            type: 3, // STRING
+            name: "type",
+            description: "Type of game to play",
+            required: true,
+            choices: [
+              { name: "Trivia - Test your knowledge", value: "trivia" },
+              { name: "Adventure - Choose your path", value: "adventure" },
+              { name: "Reaction - Test your reflexes", value: "reaction" },
+              { name: "Guess Number - Logic mode", value: "guess-number" },
+              { name: "Dice Duel - Highest roll wins", value: "dice-roll" },
+              { name: "Battle - Turn-based duel", value: "battle" },
+              { name: "IR Clue Hunt - Query & solve", value: "ir-clue" },
+              { name: "Document Hunt - BM25 search", value: "doc-hunt" },
+              { name: "HMM Sequence - Probabilistic path", value: "hmm-sequence" },
+              { name: "N-gram Story Weave", value: "ngram-story" },
+              { name: "PMI Association", value: "pmi" },
+              { name: "PMI Choice", value: "pmi-choice" },
+            ],
+          },
+          {
+            type: 3, // STRING
+            name: "scope",
+            description: "Where to run the game",
+            required: false,
+            choices: [
+              { name: "Current channel", value: "channel" },
+              { name: "Thread", value: "thread" },
+              { name: "DM", value: "dm" },
+            ],
+          },
+          {
+            type: 5, // BOOLEAN
+            name: "vs_bot",
+            description: "Play against a bot opponent",
+            required: false,
+          },
+          {
+            type: 4, // INTEGER
+            name: "rounds",
+            description: "Number of rounds (1-20)",
+            required: false,
+            min_value: 1,
+            max_value: 20,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "stop",
+        description: "Stop the current game in this channel",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "stats",
+        description: "View your mini-game statistics",
+        options: [
+          {
+            type: 6, // USER
+            name: "user",
+            description: "User to view stats for",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "guess",
+        description: "Submit a guess (for guess-number game)",
+        options: [
+          {
+            type: 4, // INTEGER
+            name: "value",
+            description: "Your guess",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "roll",
+        description: "Roll dice (for dice game)",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "recommend",
+        description: "Get game recommendations based on your history",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "leaderboard",
+        description: "View mini-game leaderboard",
+      },
+    ],
+  },
+
+  // Loot System
+  {
+    name: "loot",
+    description: "Pull loot, view inventory and achievements",
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "pull",
+        description: "Draw a random item",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "inventory",
+        description: "Show your inventory",
+        options: [
+          {
+            type: 6, // USER
+            name: "user",
+            description: "User to view",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "achievements",
+        description: "Show achievements",
+        options: [
+          {
+            type: 6, // USER
+            name: "user",
+            description: "User to view",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "leaderboard",
+        description: "Top loot collectors in this server",
+      },
+    ],
+  },
+
+  // Inventory System
+  {
+    name: "inventory",
+    description: "View and use items",
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "list",
+        description: "Show your inventory",
+        options: [
+          {
+            type: 6, // USER
+            name: "user",
+            description: "User to view",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "use",
+        description: "Use an item from your inventory",
+        options: [
+          {
+            type: 3, // STRING
+            name: "item",
+            description: "Item name",
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 const rest = new REST({ version: "10" }).setToken(config.discord.token);

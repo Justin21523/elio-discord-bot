@@ -10,7 +10,9 @@ ENV NODE_ENV=production \
 
 # Install app deps first (leverage Docker layer cache)
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+# Use npm ci when lockfile exists; otherwise fall back to npm install (no dev deps)
+RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install --omit=dev; fi \
+  && npm cache clean --force
 
 # Copy source
 COPY . .

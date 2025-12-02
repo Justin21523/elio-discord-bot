@@ -56,4 +56,6 @@ models/
 *.swo
 Thumbs.db
 
-
+# Deployment scripts with credentials
+scripts/deploy-remote.sh
+remote.md

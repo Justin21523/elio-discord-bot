@@ -15,6 +15,12 @@ export * as moderation from "./moderation.js";
 export * as web from "./web.js";
 export * as images from "./images.js";
 export * as persona from "./persona.js";
+export * as markov from "./markov.js";
+export * as recs from "./recs.js";
+export * as ir from "./ir.js";
+export * as personaLogic from "./personaLogic.js";
+export * as hybrid from "./hybrid.js";
+export * as gameAI from "./gameAI.js";
 
 // Legacy exports for backward compatibility
 export { run as agentRun } from "./agent.js";
@@ -93,6 +99,9 @@ import * as moderationModule from "./moderation.js";
 import * as webModule from "./web.js";
 import * as imagesModule from "./images.js";
 import * as personaModule from "./persona.js";
+import * as personaLogicModule from "./personaLogic.js";
+import * as hybridModule from "./hybrid.js";
+import * as gameAIModule from "./gameAI.js";
 import { healthCheck as healthCheckFn } from "./client.js";
 
 export default {
@@ -107,5 +116,8 @@ export default {
   web: webModule,
   images: imagesModule,
   persona: personaModule,
+  personaLogic: personaLogicModule,
+  hybrid: hybridModule,
+  gameAI: gameAIModule,
   healthCheck: healthCheckFn,
 };

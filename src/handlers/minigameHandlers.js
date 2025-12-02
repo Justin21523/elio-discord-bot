@@ -17,6 +17,41 @@ export async function handleMinigameButton(interaction) {
     // Format: {gameType}_{action}_{sessionId}_{data}
     const parts = customId.split("_");
 
+    // Special case: recommended start buttons use prefix "minigame_start_<gameType>"
+    if (customId.startsWith("minigame_start_")) {
+      const gameType = customId.replace("minigame_start_", "");
+      // Reuse minigame start with defaults
+      await interaction.reply({
+        embeds: [
+          {
+            title: "🎮 Launching Recommended Game",
+            description: `Starting **${gameType}** ...`,
+            color: 0x2ecc71,
+          },
+        ],
+        ephemeral: true,
+      });
+      const { startGame } = await import("../services/minigames/GameManager.js");
+      const result = await startGame(gameType, interaction.channel, interaction.user, {
+        guildId: interaction.guildId,
+      });
+      if (!result.ok) {
+        await interaction.followUp({ content: `❌ ${result.error}`, ephemeral: true });
+      } else {
+        await interaction.followUp({
+          embeds: [
+            {
+              title: "✅ Game Started",
+              description: `Check the channel for **${gameType}**.`,
+              color: 0x2ecc71,
+            },
+          ],
+          ephemeral: true,
+        });
+      }
+      return;
+    }
+
     if (parts.length < 3) {
       await interaction.reply({
         content: "Invalid game button",
@@ -25,8 +60,8 @@ export async function handleMinigameButton(interaction) {
       return;
     }
 
-    const gameType = parts[0]; // trivia, adventure, reaction
-    const action = parts[1]; // answer, choice, click
+    const gameType = parts[0]; // trivia, adventure, reaction, battle, etc.
+    const action = parts[1]; // answer, choice, click, skill
     const sessionId = parts[2];
     const dataIndex = parts[3]; // optional - answer index, choice index, etc.
 
@@ -65,6 +100,16 @@ export async function handleMinigameButton(interaction) {
       });
     } else if (gameType === "reaction" && action === "click") {
       result = await game.handleAction(interaction.user.id, "click", {});
+    } else if (gameType === "dice-roll" && action === "roll") {
+      result = await game.handleAction(interaction.user.id, "roll", {});
+    } else if (gameType === "adventure" && action === "choice") {
+      const choiceIndex = parseInt(dataIndex, 10);
+      result = await game.handleAction(interaction.user.id, "choice", { choiceIndex });
+    } else if (gameType === "battle" && action === "skill") {
+      const skillId = dataIndex;
+      result = await game.handleAction(interaction.user.id, "skill", { skillId });
+    } else if (gameType === "ngram-story" && action === "narrate") {
+      result = await game.handleAction(interaction.user.id, "narrate", { keyword: dataIndex || "" });
     } else {
       await interaction.reply({
         content: "❌ Unknown game action",
@@ -75,10 +120,7 @@ export async function handleMinigameButton(interaction) {
 
     // Respond to interaction
     if (result.ok) {
-      // Acknowledge the interaction
-      await interaction.deferUpdate().catch(() => {
-        // Ignore if already acknowledged
-      });
+      await interaction.deferUpdate().catch(() => {});
     } else {
       await interaction.reply({
         content: `❌ ${result.error}`,

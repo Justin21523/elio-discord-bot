@@ -132,24 +132,37 @@ export async function execute(message, services) {
       console.error('[ERR] RAG search failed:', error.message);
     }
 
-    // Generate response with persona
+    // Generate response with persona using ML/statistical models
     const conversationContext = history.slice(-10).map(h => ({
       role: h.role,
       content: h.content
     }));
 
-    const result = await services.ai.persona.compose(
-      message.content,
-      persona,
-      {
-        context,
-        conversationHistory: conversationContext,
-        maxTokens: parseInt(process.env.MAX_MESSAGE_LENGTH || '2000')
-      }
-    );
+    // Use hybrid ensemble system (Markov + TF-IDF + HMM + Thompson Sampling + more)
+    let result = await services.ai.hybrid.reply({
+      persona: persona.name,
+      message: message.content,
+      history: conversationContext,
+      userId: message.author.id,
+      channelId: message.channelId,
+      topK: 5,
+      maxLen: 80
+    });
+
+    // Fallback: if hybrid fails, use basic persona logic
+    if (!result.ok) {
+      console.warn('[WARN] Hybrid reply failed, falling back to personaLogic');
+      result = await services.ai.personaLogic.reply({
+        persona: persona.name,
+        message: message.content,
+        history: conversationContext,
+        topK: 5,
+        maxLen: 80
+      });
+    }
 
     if (!result.ok) {
-      console.error(`[ERR] Persona compose failed: ${result.error || 'unknown error'}`);
+      console.error(`[ERR] All AI strategies failed: ${result.error?.message || 'unknown error'}`);
       await message.reply("*pauses* Sorry, I'm having trouble thinking right now. Can you try again?");
       return;
     }

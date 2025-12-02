@@ -1,0 +1,50 @@
+{
+  "documents": [
+    {
+      "id": "doc1",
+      "text": "The universe is vast and full of mysteries. Stars, planets, and galaxies await exploration.",
+      "metadata": {"category": "space", "persona": "Elio"}
+    },
+    {
+      "id": "doc2",
+      "text": "Potatoes are wonderful vegetables. They can be baked, fried, or mashed into delicious dishes.",
+      "metadata": {"category": "food", "persona": "Glordon"}
+    },
+    {
+      "id": "doc3",
+      "text": "Military training requires discipline and dedication. Safety protocols must be followed.",
+      "metadata": {"category": "training", "persona": "Olga"}
+    },
+    {
+      "id": "doc4",
+      "text": "Space exploration has led to amazing discoveries about our solar system and beyond.",
+      "metadata": {"category": "space", "persona": "Elio"}
+    },
+    {
+      "id": "doc5",
+      "text": "Friendship is one of the most important aspects of life. Friends support each other.",
+      "metadata": {"category": "friendship", "persona": "Glordon"}
+    },
+    {
+      "id": "doc6",
+      "text": "The cosmic rays from distant stars carry information about the universe's history.",
+      "metadata": {"category": "space", "persona": "Elio"}
+    },
+    {
+      "id": "doc7",
+      "text": "Emotions are a natural part of being alive. It's okay to feel sad, happy, or excited.",
+      "metadata": {"category": "feelings", "persona": "Glordon"}
+    },
+    {
+      "id": "doc8",
+      "text": "The Communiverse is home to many different alien species who live together in harmony.",
+      "metadata": {"category": "lore", "persona": "Elio"}
+    }
+  ],
+  "queries": [
+    {"query": "Tell me about space", "expected_top_doc": "doc1"},
+    {"query": "What are potatoes", "expected_top_doc": "doc2"},
+    {"query": "How to stay safe", "expected_top_doc": "doc3"},
+    {"query": "friendship and support", "expected_top_doc": "doc5"}
+  ]
+}

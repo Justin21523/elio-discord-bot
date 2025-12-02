@@ -1,0 +1,184 @@
+# GitHub Actions - Rollback Workflow
+# Manually triggered to rollback to a previous deployment
+
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: 'Target commit SHA to rollback to (leave empty for last good deploy)'
+        required: false
+        type: string
+      confirm:
+        description: 'Type "ROLLBACK" to confirm'
+        required: true
+        type: string
+
+env:
+  DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+  DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+  DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+
+jobs:
+  # ===========================================
+  # Validate Rollback Request
+  # ===========================================
+  validate:
+    name: Validate Rollback
+    runs-on: ubuntu-latest
+
+    outputs:
+      target_sha: ${{ steps.determine_target.outputs.sha }}
+
+    steps:
+      - name: Check confirmation
+        if: github.event.inputs.confirm != 'ROLLBACK'
+        run: |
+          echo "Rollback not confirmed. Please type 'ROLLBACK' to confirm."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Determine target SHA
+        id: determine_target
+        run: |
+          if [ -n "${{ github.event.inputs.target_sha }}" ]; then
+            TARGET_SHA="${{ github.event.inputs.target_sha }}"
+            echo "Using provided SHA: $TARGET_SHA"
+          else
+            TARGET_SHA=$(ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+              cat ${{ env.DEPLOY_PATH }}/.last_good_deploy 2>/dev/null || echo ''
+            ")
+            if [ -z "$TARGET_SHA" ]; then
+              echo "No last good deploy found and no target SHA provided"
+              exit 1
+            fi
+            echo "Using last good deploy: $TARGET_SHA"
+          fi
+          echo "sha=$TARGET_SHA" >> $GITHUB_OUTPUT
+
+      - name: Validate target SHA exists
+        run: |
+          TARGET_SHA="${{ steps.determine_target.outputs.sha }}"
+          if ! git cat-file -e "$TARGET_SHA^{commit}" 2>/dev/null; then
+            echo "Target SHA $TARGET_SHA does not exist in repository"
+            exit 1
+          fi
+          echo "Target SHA validated: $TARGET_SHA"
+
+  # ===========================================
+  # Execute Rollback
+  # ===========================================
+  rollback:
+    name: Execute Rollback
+    runs-on: ubuntu-latest
+    needs: [validate]
+    environment: production
+
+    steps:
+      - name: Checkout target SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.target_sha }}
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Get current deployment info
+        run: |
+          CURRENT_SHA=$(ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cat ${{ env.DEPLOY_PATH }}/.current_deploy 2>/dev/null || echo 'unknown'
+          ")
+          echo "Current deployment: $CURRENT_SHA"
+          echo "Rolling back to: ${{ needs.validate.outputs.target_sha }}"
+
+      - name: Stop services
+        run: |
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            docker compose down || true
+          "
+
+      - name: Sync rollback code to server
+        run: |
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            --exclude 'ai-service/__pycache__' \
+            --exclude 'ai-service/.venv' \
+            --exclude 'data/training/*.jsonl' \
+            --exclude 'logs' \
+            --exclude '.current_deploy' \
+            --exclude '.last_good_deploy' \
+            -e "ssh -p ${{ env.DEPLOY_PORT }}" \
+            ./ ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }}:${{ env.DEPLOY_PATH }}/
+
+      - name: Install dependencies and rebuild
+        run: |
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            npm ci --production && \
+            docker compose build --no-cache
+          "
+
+      - name: Start services
+        run: |
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            docker compose up -d mongo && \
+            sleep 5 && \
+            docker compose up -d bot
+          "
+
+      - name: Run database migrations
+        run: |
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            docker compose exec -T bot npm run ensure-indexes || npm run ensure-indexes
+          "
+
+      - name: Health check
+        run: |
+          sleep 10
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            docker compose ps && \
+            docker compose logs --tail=30 bot
+          "
+
+      - name: Update deployment tracking
+        run: |
+          ssh -p ${{ env.DEPLOY_PORT }} ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} "
+            cd ${{ env.DEPLOY_PATH }} && \
+            echo '${{ needs.validate.outputs.target_sha }}' > .current_deploy && \
+            echo 'Rollback to: ${{ needs.validate.outputs.target_sha }} at $(date)' >> deployment.log
+          "
+
+      - name: Notify rollback complete
+        run: |
+          echo "Rollback complete!"
+          echo "Rolled back to SHA: ${{ needs.validate.outputs.target_sha }}"
+          echo "Server: ${{ env.DEPLOY_HOST }}"

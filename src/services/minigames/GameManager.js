@@ -10,16 +10,39 @@ import { logger } from "../../util/logger.js";
 import TriviaGame from "./games/TriviaGame.js";
 import AdventureGame from "./games/AdventureGame.js";
 import ReactionGame from "./games/ReactionGame.js";
+import GuessNumberGame from "./games/GuessNumberGame.js";
+import DiceRollGame from "./games/DiceRollGame.js";
+import BattleGame from "./games/BattleGame.js";
+import { getKeyItems } from "../loot.js";
+import { logEvent } from "../analytics/events.js";
+import { COOLDOWNS } from "../../config/cooldowns.js";
+import IRClueGame from "./games/IRClueGame.js";
+import IRDocHuntGame from "./games/IRDocHuntGame.js";
+import HMMSequenceGame from "./games/HMMSequenceGame.js";
+import NgramStoryGame from "./games/NgramStoryGame.js";
+import PMIAssociationGame from "./games/PMIAssociationGame.js";
+import KeywordPMIGame from "./games/KeywordPMIGame.js";
 
 const GAME_TYPES = {
   trivia: TriviaGame,
   adventure: AdventureGame,
   reaction: ReactionGame,
+  "guess-number": GuessNumberGame,
+  "dice-roll": DiceRollGame,
+  battle: BattleGame,
+  "ir-clue": IRClueGame,
+  "doc-hunt": IRDocHuntGame,
+  "hmm-sequence": HMMSequenceGame,
+  "ngram-story": NgramStoryGame,
+  "pmi": PMIAssociationGame,
+  "pmi-choice": KeywordPMIGame,
 };
 
 // Active game sessions (in-memory)
 // Map<channelId, GameInstance>
 const activeSessions = new Map();
+const startCooldowns = new Map(); // Map<channelId, timestamp>
+const START_COOLDOWN_MS = COOLDOWNS.minigameStartMs || 10_000;
 
 export class GameManager {
   /**
@@ -27,12 +50,32 @@ export class GameManager {
    */
   static async startGame(gameType, channel, user, options = {}) {
     try {
-      // Check if game already active in this channel
-      if (activeSessions.has(channel.id)) {
+      const now = Date.now();
+      const lastStart = startCooldowns.get(channel.id) || 0;
+      if (now - lastStart < START_COOLDOWN_MS) {
         return {
           ok: false,
-          error: "A game is already active in this channel. Finish it first!",
+          error: "Too many game starts. Please wait a few seconds and try again.",
         };
+      }
+
+      // Check if game already active in this channel
+      if (activeSessions.has(channel.id)) {
+        const existingGame = activeSessions.get(channel.id);
+        const age = now - (existingGame.startedAt || now);
+        const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+        // Auto-clear stale sessions
+        if (age > STALE_THRESHOLD_MS || existingGame.status === "ended") {
+          activeSessions.delete(channel.id);
+          startCooldowns.delete(channel.id);
+          logger.info("[MINIGAME] Auto-cleared stale session", { channelId: channel.id, age });
+        } else {
+          return {
+            ok: false,
+            error: "A game is already active in this channel. Use `/minigame stop` to end it first!",
+          };
+        }
       }
 
       // Get game class
@@ -45,13 +88,32 @@ export class GameManager {
       }
 
       // Create game instance
-      const game = new GameClass(channel, user, options);
+      let gameOptions = { ...options };
+
+      // Inject key items into adventure from inventory
+      if (gameType === "adventure") {
+        const keyItems = await getKeyItems(user.id, options.guildId);
+        gameOptions = { ...options, keyItems };
+      }
+
+      const game = new GameClass(channel, user, gameOptions);
 
       // Initialize game
       await game.initialize();
 
+       // Log start
+      await logEvent({
+        userId: user.id,
+        username: user.username,
+        guildId: options.guildId,
+        gameType,
+        action: "start",
+        meta: { scope: options.scope || "channel" },
+      });
+
       // Store in active sessions
       activeSessions.set(channel.id, game);
+      startCooldowns.set(channel.id, now);
 
       // Save to database
       await this._saveGameState(game);
@@ -85,12 +147,22 @@ export class GameManager {
     try {
       const result = await game.handleAction(userId, action, data);
 
+      // Update database + events
+      await logEvent({
+        userId,
+        username: userId,
+        guildId: data.guildId || null,
+        gameType: game.constructor.name.replace("Game", "").toLowerCase(),
+        action,
+        meta: data,
+      });
+
       // Update database
       await this._saveGameState(game);
 
       // Check if game ended
       if (game.isEnded()) {
-        await this.endGame(channelId);
+        await this.endGame(channelId, result?.endReason || "completed");
       }
 
       return result;
@@ -112,6 +184,19 @@ export class GameManager {
 
     try {
       await game.end(reason);
+      // Log end
+      await logEvent({
+        userId: game.initiator?.id,
+        username: game.initiator?.username,
+        guildId: game.options?.guildId || null,
+        gameType: game.constructor.name.replace("Game", "").toLowerCase(),
+        action: "end",
+        meta: {
+          reason,
+          winnerId: game.winner?.userId,
+          winnerName: game.winner?.username,
+        },
+      });
 
       // Save final state
       await this._saveGameState(game);
@@ -140,6 +225,57 @@ export class GameManager {
    */
   static getActiveGames() {
     return Array.from(activeSessions.values());
+  }
+
+  /**
+   * Force clear a stuck game session (admin use)
+   */
+  static forceClear(channelId) {
+    if (activeSessions.has(channelId)) {
+      activeSessions.delete(channelId);
+      startCooldowns.delete(channelId);
+      logger.info("[MINIGAME] Force cleared session", { channelId });
+      return { ok: true, message: "Session cleared" };
+    }
+    return { ok: false, error: "No session found for this channel" };
+  }
+
+  /**
+   * Clear all stale sessions (older than 30 minutes)
+   */
+  static cleanupStaleSessions() {
+    const now = Date.now();
+    const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    let cleared = 0;
+
+    for (const [channelId, game] of activeSessions.entries()) {
+      const age = now - (game.startedAt || now);
+      if (age > STALE_THRESHOLD_MS) {
+        activeSessions.delete(channelId);
+        startCooldowns.delete(channelId);
+        cleared++;
+        logger.info("[MINIGAME] Cleared stale session", { channelId, age });
+      }
+    }
+
+    return { ok: true, cleared };
+  }
+
+  /**
+   * Get debug info about active sessions
+   */
+  static getDebugInfo() {
+    const sessions = [];
+    for (const [channelId, game] of activeSessions.entries()) {
+      sessions.push({
+        channelId,
+        gameType: game.constructor.name,
+        status: game.status,
+        startedAt: game.startedAt,
+        players: game.players?.length || 0,
+      });
+    }
+    return sessions;
   }
 
   /**

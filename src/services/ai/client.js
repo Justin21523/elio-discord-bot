@@ -4,9 +4,14 @@
 // ============================================================================
 
 import axios from "axios";
-import { AI_SERVICE_URL, AI_SERVICE_TIMEOUT_MS } from "../../config.js";
+import {
+  AI_SERVICE_URL,
+  AI_SERVICE_TIMEOUT_MS,
+  AI_MOCK_MODE,
+} from "../../config.js";
 import { logger } from "../../util/logger.js";
 import { incrementCounter, observeHistogram } from "../../util/metrics.js";
+import { mockPost, mockGet } from "./mock.js";
 
 /**
  * Create axios instance for AI service
@@ -94,6 +99,11 @@ client.interceptors.response.use(
  * @returns {Promise<{ok: true, data: any} | {ok: false, error: object}>}
  */
 export async function post(endpoint, data) {
+  if (AI_MOCK_MODE) {
+    logger.debug("[AI-CLIENT] Mock POST", { endpoint });
+    return mockPost(endpoint, data);
+  }
+
   try {
     const response = await client.post(endpoint, data);
 
@@ -171,6 +181,11 @@ export async function post(endpoint, data) {
  * @returns {Promise<{ok: true, data: any} | {ok: false, error: object}>}
  */
 export async function get(endpoint, params = {}) {
+  if (AI_MOCK_MODE) {
+    logger.debug("[AI-CLIENT] Mock GET", { endpoint });
+    return mockGet(endpoint, params);
+  }
+
   try {
     const response = await client.get(endpoint, { params });
 
