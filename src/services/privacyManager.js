@@ -8,7 +8,7 @@
  * - Privacy compliance
  */
 
-import { ok, err } from '../utils/result.js';
+import { ok, err } from '../util/result.js';
 
 const COLLECTION = 'privacy_settings';
 const MESSAGES_COLLECTION = 'channel_messages';

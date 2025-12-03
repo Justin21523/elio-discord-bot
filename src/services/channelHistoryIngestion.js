@@ -9,7 +9,7 @@
  * - Optional embedding generation for RAG
  */
 
-import { ok, err } from '../utils/result.js';
+import { ok, err } from '../util/result.js';
 import { PrivacyManager } from './privacyManager.js';
 
 const COLLECTION = 'channel_messages';
