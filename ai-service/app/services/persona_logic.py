@@ -5,6 +5,7 @@ Uses TF-IDF similarity + Markov generation + persona style templates + simple mo
 from __future__ import annotations
 
 import json
+import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from .markov import train_from_corpus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -71,19 +74,30 @@ class PersonaLogicEngine:
         for idx in top_indices:
             sample = model.samples[idx]
             base_reply = sample.reply
-            markov_text = model.markov_text.generate(
-                seed=f"{query_text} {base_reply}",
-                max_len=max_len,
-                temperature=0.9,
-                repetition_penalty=1.15,
-            )
-            blended = self._blend_text(
-                persona_key,
-                base_reply,
-                markov_text,
-                mood=model.current_mood,
-            )
-            candidates.append((blended, float(sims[idx]), sample))
+            similarity = float(sims[idx])
+
+            # Use original reply if similarity is high (>0.3), otherwise blend with Markov
+            if similarity > 0.3:
+                # High similarity - use the actual training reply (more relevant)
+                final_text = base_reply
+            else:
+                # Lower similarity - blend with Markov for variety
+                markov_text = model.markov_text.generate(
+                    seed=f"{query_text} {base_reply}",
+                    max_len=max_len,
+                    temperature=0.9,
+                    repetition_penalty=1.15,
+                )
+                final_text = self._blend_text(
+                    persona_key,
+                    base_reply,
+                    markov_text,
+                    mood=model.current_mood,
+                )
+
+            # Apply style wrapping to final text
+            styled = self._style_wrap(persona_key, final_text, model.current_mood)
+            candidates.append((styled, similarity, sample))
 
         if not candidates:
             return {
@@ -118,9 +132,12 @@ class PersonaLogicEngine:
         return {p["name"]: p for p in personas}
 
     def _load_corpus(self) -> Dict[str, List[PersonaSample]]:
+        # Load ALL training data files for better coverage
         paths = [
             self.root / "data" / "training" / "final-complete-training-data.jsonl",
             self.root / "data" / "training" / "general-conversation-subset.jsonl",
+            self.root / "data" / "training" / "fandom-first-person-training-data.jsonl",  # Rich first-person dialogues
+            self.root / "data" / "training" / "fandom-lore-training-data.jsonl",  # Lore-specific data
         ]
         corpus: Dict[str, List[PersonaSample]] = {}
         for path in paths:
@@ -147,6 +164,14 @@ class PersonaLogicEngine:
             pooled.extend(samples)
         if pooled:
             corpus.setdefault("default", pooled)
+
+        # Log corpus statistics
+        total_samples = sum(len(s) for s in corpus.values())
+        logger.info(f"[PersonaLogic] Loaded {total_samples} samples across {len(corpus)} personas")
+        for persona, samples in corpus.items():
+            if persona != "default":
+                logger.info(f"  - {persona}: {len(samples)} samples")
+
         return corpus
 
     def _build_models(self) -> Dict[str, PersonaModel]:
@@ -154,8 +179,16 @@ class PersonaLogicEngine:
         for persona, samples in self.corpus.items():
             texts = []
             for s in samples:
-                texts.append(s.user or s.reply)
-            vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=1)
+                # Combine user question + scenario for better semantic matching
+                # This helps find the most relevant context for the query
+                combined = f"{s.user} {s.scenario}".strip()
+                texts.append(combined if combined else s.reply)
+            vectorizer = TfidfVectorizer(
+                stop_words="english",
+                ngram_range=(1, 3),  # Include trigrams for better phrase matching
+                min_df=1,
+                max_df=0.95,  # Ignore very common terms
+            )
             matrix = vectorizer.fit_transform(texts)
             markov_model = train_from_corpus([s.reply for s in samples], order=2)
             mood_transitions = self._mood_transitions(persona)
