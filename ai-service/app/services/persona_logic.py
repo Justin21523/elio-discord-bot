@@ -170,11 +170,16 @@ class PersonaLogicEngine:
         return models
 
     # --- generation helpers ---
-    def _build_query(self, message: str, history: List[Dict[str, str]]) -> str:
+    def _build_query(self, message: str, history: List) -> str:
         parts = []
         for item in history[-3:]:
-            role = item.get("role")
-            text = item.get("content", "")
+            # Handle both dict and Pydantic model
+            if hasattr(item, "role"):
+                role = item.role
+                text = item.content if hasattr(item, "content") else ""
+            else:
+                role = item.get("role") if isinstance(item, dict) else None
+                text = item.get("content", "") if isinstance(item, dict) else ""
             if role == "assistant":
                 parts.append(f"they said {text}")
             else:
