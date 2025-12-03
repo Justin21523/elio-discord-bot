@@ -710,6 +710,168 @@ const commands = [
       },
     ],
   },
+
+  // Channel History System
+  {
+    name: "history",
+    description: "Channel message history management (Admin only)",
+    default_member_permissions: "8", // Administrator
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "sync",
+        description: "Sync channel history to database",
+        options: [
+          {
+            type: 7, // CHANNEL
+            name: "channel",
+            description: "Channel to sync (default: current)",
+            required: false,
+          },
+          {
+            type: 4, // INTEGER
+            name: "days",
+            description: "Days of history to fetch (1-30)",
+            required: false,
+            min_value: 1,
+            max_value: 30,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "stats",
+        description: "View channel history statistics",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "search",
+        description: "Search archived messages",
+        options: [
+          {
+            type: 3, // STRING
+            name: "query",
+            description: "Search query",
+            required: true,
+          },
+          {
+            type: 4, // INTEGER
+            name: "limit",
+            description: "Max results (1-20)",
+            required: false,
+            min_value: 1,
+            max_value: 20,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "context",
+        description: "Get recent conversation context",
+        options: [
+          {
+            type: 7, // CHANNEL
+            name: "channel",
+            description: "Channel to get context from",
+            required: false,
+          },
+          {
+            type: 4, // INTEGER
+            name: "messages",
+            description: "Number of messages (5-50)",
+            required: false,
+            min_value: 5,
+            max_value: 50,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "export",
+        description: "Export messages for training",
+        options: [
+          {
+            type: 4, // INTEGER
+            name: "limit",
+            description: "Max messages to export",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "cleanup",
+        description: "Clean up old messages",
+        options: [
+          {
+            type: 4, // INTEGER
+            name: "days",
+            description: "Delete messages older than N days",
+            required: false,
+          },
+        ],
+      },
+    ],
+  },
+
+  // Privacy Settings
+  {
+    name: "privacy",
+    description: "Manage your privacy settings",
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "settings",
+        description: "View your current privacy settings",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "opt-out",
+        description: "Opt out of data collection",
+        options: [
+          {
+            type: 3, // STRING
+            name: "type",
+            description: "What to opt out of",
+            required: true,
+            choices: [
+              { name: "History Collection", value: "history" },
+              { name: "ML Training", value: "training" },
+              { name: "Both", value: "all" },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "opt-in",
+        description: "Opt back into data collection",
+        options: [
+          {
+            type: 3, // STRING
+            name: "type",
+            description: "What to opt into",
+            required: true,
+            choices: [
+              { name: "History Collection", value: "history" },
+              { name: "ML Training", value: "training" },
+              { name: "Both", value: "all" },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "delete",
+        description: "Request deletion of all your data",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "info",
+        description: "Learn about our data collection practices",
+      },
+    ],
+  },
 ];
 
 const rest = new REST({ version: "10" }).setToken(config.discord.token);
