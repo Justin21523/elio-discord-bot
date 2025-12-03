@@ -47,6 +47,7 @@ class InteractionLogger {
    * @param {string} params.botResponse - Bot's response
    * @param {string} params.responseSource - 'personaLogic' | 'llm' | 'rag' | 'fallback'
    * @param {number} params.similarity - TF-IDF similarity score
+   * @param {string} params.strategy - ML strategy used (for bandit feedback)
    * @returns {Object} { ok: boolean, data?: { queued: boolean } }
    */
   log({
@@ -59,6 +60,7 @@ class InteractionLogger {
     botResponse,
     responseSource = 'personaLogic',
     similarity = null,
+    strategy = null,
   }) {
     if (!this.enabled) {
       return { ok: true, data: { queued: false } };
@@ -84,6 +86,7 @@ class InteractionLogger {
       botResponse,
       responseSource,
       similarity,
+      strategy,
     });
 
     // Flush immediately if batch is full
@@ -92,6 +95,54 @@ class InteractionLogger {
     }
 
     return { ok: true, data: { queued: true } };
+  }
+
+  /**
+   * Log interaction immediately and return the ID (for feedback buttons)
+   * @returns {Promise<{ok: boolean, data?: {id: string}}>}
+   */
+  async logImmediate({
+    guildId,
+    channelId,
+    userId,
+    username,
+    persona,
+    userMessage,
+    botResponse,
+    responseSource = 'personaLogic',
+    similarity = null,
+    strategy = null,
+  }) {
+    if (!this.enabled) {
+      return { ok: false, error: 'logger_disabled' };
+    }
+
+    if (!userMessage || userMessage.length < 3) {
+      return { ok: false, error: 'message_too_short' };
+    }
+
+    try {
+      const result = await logInteraction({
+        guildId,
+        channelId,
+        userId,
+        username,
+        persona,
+        userMessage,
+        botResponse,
+        responseSource,
+        similarity,
+        strategy,
+      });
+
+      if (result.ok && result.data?._id) {
+        return { ok: true, data: { id: result.data._id.toString() } };
+      }
+      return result;
+    } catch (error) {
+      logger.error('[InteractionLogger] Immediate log error:', error.message);
+      return { ok: false, error: error.message };
+    }
   }
 
   /**

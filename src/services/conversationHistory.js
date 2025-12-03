@@ -123,18 +123,32 @@ export function getActivePersonas(channelId) {
 
 /**
  * Cleanup old conversations periodically
+ * Structure: Map<channelId, Map<userId, Map<personaName, Array>>>
  */
 function cleanupOldConversations() {
   const now = Date.now();
 
   for (const [channelId, channelConvos] of conversations.entries()) {
-    for (const [personaName, history] of channelConvos.entries()) {
-      const filtered = history.filter(msg => now - msg.timestamp < HISTORY_TTL_MS);
+    for (const [userId, userConvos] of channelConvos.entries()) {
+      for (const [personaName, history] of userConvos.entries()) {
+        // Ensure history is an array before filtering
+        if (!Array.isArray(history)) {
+          userConvos.delete(personaName);
+          continue;
+        }
 
-      if (filtered.length === 0) {
-        channelConvos.delete(personaName);
-      } else if (filtered.length !== history.length) {
-        channelConvos.set(personaName, filtered);
+        const filtered = history.filter(msg => now - msg.timestamp < HISTORY_TTL_MS);
+
+        if (filtered.length === 0) {
+          userConvos.delete(personaName);
+        } else if (filtered.length !== history.length) {
+          userConvos.set(personaName, filtered);
+        }
+      }
+
+      // Remove empty user entries
+      if (userConvos.size === 0) {
+        channelConvos.delete(userId);
       }
     }
 
