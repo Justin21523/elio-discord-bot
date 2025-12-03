@@ -3,7 +3,7 @@ import { httpPostJson } from './_client.js';
 
 export async function compose(text, persona, options = {}) {
   const {
-    maxTokens = 400,
+    maxTokens = 80, // Default to concise responses (~320 chars)
     context = '',
     conversationHistory = [],
     useFinetuned = true
