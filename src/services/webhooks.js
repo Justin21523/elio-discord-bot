@@ -58,7 +58,8 @@ export async function personaSay(channelId, persona, payload) {
         avatarURL: persona.avatar || undefined,
         content: payload?.content,
         embeds: payload?.embeds || [],
-        allowedMentions: { parse: [] },
+        components: payload?.components || [],
+        allowedMentions: { parse: ['users'] },
       });
       return ok({ via: "webhook" });
     } catch (e1) {
@@ -85,7 +86,8 @@ export async function personaSay(channelId, persona, payload) {
         avatarURL: persona.avatar || undefined,
         content: payload?.content,
         embeds: payload?.embeds || [],
-        allowedMentions: { parse: [] },
+        components: payload?.components || [],
+        allowedMentions: { parse: ['users'] },
       });
       return ok({ via: "webhook_recreated" });
     }
@@ -96,7 +98,8 @@ export async function personaSay(channelId, persona, payload) {
       await ch.send({
         content: payload?.content || `**${persona?.name || "Persona"}**`,
         embeds: payload?.embeds || [],
-        allowedMentions: { parse: [] },
+        components: payload?.components || [],
+        allowedMentions: { parse: ['users'] },
       });
       return ok({ via: "fallback_message" });
     } catch (e3) {
