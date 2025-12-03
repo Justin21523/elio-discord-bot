@@ -420,6 +420,14 @@ function getButtonHandler(customId) {
     };
   }
 
+  // Feedback buttons for continuous learning
+  if (customId.startsWith("feedback_up_") || customId.startsWith("feedback_down_")) {
+    return async (interaction) => {
+      const { handleFeedbackButton } = await import("./handlers/feedbackHandlers.js");
+      return handleFeedbackButton(interaction);
+    };
+  }
+
   return null;
 }
 

@@ -17,6 +17,7 @@ from . import ir_router
 from . import persona_logic_router
 from . import hybrid_router
 from . import game_ai_router
+from . import reload_router
 
 __all__ = [
     "llm_router",
@@ -33,4 +34,5 @@ __all__ = [
     "persona_logic_router",
     "hybrid_router",
     "game_ai_router",
+    "reload_router",
 ]

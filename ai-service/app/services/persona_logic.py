@@ -138,7 +138,15 @@ class PersonaLogicEngine:
             self.root / "data" / "training" / "general-conversation-subset.jsonl",
             self.root / "data" / "training" / "fandom-first-person-training-data.jsonl",  # Rich first-person dialogues
             self.root / "data" / "training" / "fandom-lore-training-data.jsonl",  # Lore-specific data
+            self.root / "data" / "training" / "multi-character-v2.jsonl",  # Multi-character generated data (2,380+)
+            self.root / "data" / "training" / "supplemental-elio-bryce-caleb.jsonl",  # Elio/Bryce/Caleb supplemental
         ]
+
+        # Also load user interaction exports (daily exports from Discord)
+        user_interaction_dir = self.root / "data" / "training" / "user-interactions"
+        if user_interaction_dir.exists():
+            for jsonl_file in user_interaction_dir.glob("*.jsonl"):
+                paths.append(jsonl_file)
         corpus: Dict[str, List[PersonaSample]] = {}
         for path in paths:
             if not path.exists():
