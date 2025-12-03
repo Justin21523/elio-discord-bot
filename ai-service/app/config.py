@@ -19,12 +19,28 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="info", env="LOG_LEVEL")  # type: ignore
     DEBUG: bool = Field(default=True, env="DEBUG")  # type: ignore
 
+    # ===== CPU-Only Mode =====
+    CPU_ONLY: bool = Field(default=True, env="CPU_ONLY")  # type: ignore
+    USE_GPU: bool = Field(default=False, env="USE_GPU")  # type: ignore
+    USE_LLM: bool = Field(default=False, env="USE_LLM")  # type: ignore
+    USE_VLM: bool = Field(default=False, env="USE_VLM")  # type: ignore
+    USE_EMBEDDINGS: bool = Field(default=False, env="USE_EMBEDDINGS")  # type: ignore
+
+    # ===== Traditional ML Features (CPU-only) =====
+    USE_BM25: bool = Field(default=True, env="USE_BM25")  # type: ignore
+    USE_NGRAM: bool = Field(default=True, env="USE_NGRAM")  # type: ignore
+    USE_INTENT: bool = Field(default=True, env="USE_INTENT")  # type: ignore
+    USE_SENTIMENT: bool = Field(default=True, env="USE_SENTIMENT")  # type: ignore
+    USE_MARKOV: bool = Field(default=True, env="USE_MARKOV")  # type: ignore
+    USE_IR: bool = Field(default=True, env="USE_IR")  # type: ignore
+    USE_PERSONA_LOGIC: bool = Field(default=True, env="USE_PERSONA_LOGIC")  # type: ignore
+
     # ===== Models / Cache / Device =====
-    LLM_MODEL: str = Field(default="deepspek", env="LLM_MODEL")  # type: ignore
-    VLM_MODEL: str = Field(default="qwen-v1", env="VLM_MODEL")  # type: ignore
+    LLM_MODEL: str = Field(default="deepseek", env="LLM_MODEL")  # type: ignore
+    VLM_MODEL: str = Field(default="qwen-vl", env="VLM_MODEL")  # type: ignore
     EMBED_MODEL: str = Field(default="BAAI/bge-m3", env="EMBED_MODEL")  # type: ignore
-    MODEL_CACHE_DIR: str = Field(default="/mnt/c/AI_LLM_projects/ai_warehouse/models", env="MODEL_CACHE_DIR")  # type: ignore
-    DEVICE: str = Field(default="cuda", env="DEVICE")  # type: ignore
+    MODEL_CACHE_DIR: str = Field(default="/app/models", env="MODEL_CACHE_DIR")  # type: ignore
+    DEVICE: str = Field(default="cpu", env="DEVICE")  # type: ignore
     HF_TOKEN: str = Field(default="", env="HF_TOKEN")  # type: ignore
 
     # ===== CORS / Preload =====
@@ -36,7 +52,7 @@ class Settings(BaseSettings):
     PRELOAD_EMBEDDINGS: bool = Field(default=False, env="PRELOAD_EMBEDDINGS")  # type: ignore
 
     # ===== Hardware =====
-    USE_8BIT: bool = Field(default=True, env="USE_8BIT")  # type: ignore
+    USE_8BIT: bool = Field(default=False, env="USE_8BIT")  # type: ignore
     USE_4BIT: bool = Field(default=False, env="USE_4BIT")  # type: ignore
     MAX_MEMORY_GB: Optional[int] = Field(default=None, env="MAX_MEMORY_GB")  # type: ignore
 
