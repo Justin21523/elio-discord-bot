@@ -285,6 +285,13 @@ function armMaintenance() {
   maintenanceJobs.push(
     cron.schedule("15 3 * * 0", () => runScript("npm", ["run", "reset:achievements"]))
   );
+  // Daily export of user interactions for continuous learning (4:00 AM)
+  maintenanceJobs.push(
+    cron.schedule("0 4 * * *", async () => {
+      const { weeklyExportJob } = await import("../jobs/exportInteractions.js");
+      await weeklyExportJob();
+    })
+  );
   logger.info("[CRON] Maintenance jobs armed");
 }
 armMaintenance();

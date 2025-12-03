@@ -12,6 +12,7 @@ import { incCounter } from "../util/metrics.js";
 import * as conversationHistory from "./conversationHistory.js";
 import * as personaSwitcher from "./personaSwitcher.js";
 import { AI_ENABLED } from "../config.js";
+import { interactionLogger } from "./interactionLogger.js";
 
 // Cooldown tracking (in-memory) - PER USER, not per channel!
 const cooldowns = new Map();
@@ -235,6 +236,20 @@ export async function handlePublicMessage(message, services) {
     }
 
     incCounter("auto_replies_total", { reason: decision.reason });
+
+    // Log interaction for continuous learning (concept drift mitigation)
+    const personaName = reply.persona?.name || 'assistant';
+    interactionLogger.log({
+      guildId: message.guildId,
+      channelId: message.channelId,
+      userId: message.author.id,
+      username: message.author.username,
+      persona: personaName,
+      userMessage: message.content,
+      botResponse: reply.text,
+      responseSource: reply.usedRAG ? 'rag' : (reply.strategy || 'personaLogic'),
+      similarity: reply.similarity || null,
+    });
   } catch (error) {
     logger.error("[MSG_ROUTER] Error handling message:", {
       error: error.message,
