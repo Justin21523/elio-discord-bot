@@ -9,7 +9,7 @@
  * - Analytics and reporting
  */
 
-import { ok, err } from '../utils/result.js';
+import { ok, err } from '../util/result.js';
 
 const COLLECTION = 'channel_messages';
 
