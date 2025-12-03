@@ -1,21 +1,29 @@
 """
 Logic-only persona responder (no LLM, CPU-friendly).
-Uses TF-IDF similarity + Markov generation + persona style templates + simple mood HMM.
+Uses embedding-based (sentence-transformers) or TF-IDF similarity for retrieval.
 """
 from __future__ import annotations
 
 import json
 import logging
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from .markov import train_from_corpus
+
+# Try to import sentence-transformers for better semantic matching
+try:
+    from sentence_transformers import SentenceTransformer
+    HAS_EMBEDDINGS = True
+except ImportError:
+    HAS_EMBEDDINGS = False
+    SentenceTransformer = None
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +43,8 @@ class PersonaModel:
     markov_text: object
     mood_transitions: Dict[str, Dict[str, float]]
     current_mood: str
+    # Embedding-based retrieval (optional, better quality)
+    embeddings: Optional[np.ndarray] = None
 
 
 class PersonaLogicEngine:
@@ -43,6 +53,20 @@ class PersonaLogicEngine:
         self.root = repo_root if (repo_root / "data").exists() else Path(__file__).resolve().parents[2]
         self.persona_meta = self._load_persona_meta()
         self.corpus = self._load_corpus()
+
+        # Initialize embedding model if available
+        self.embedding_model = None
+        if HAS_EMBEDDINGS:
+            try:
+                logger.info("[PersonaLogic] Loading embedding model (all-MiniLM-L6-v2)...")
+                self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+                logger.info("[PersonaLogic] Embedding model loaded successfully!")
+            except Exception as e:
+                logger.warning(f"[PersonaLogic] Failed to load embedding model: {e}")
+                self.embedding_model = None
+        else:
+            logger.info("[PersonaLogic] sentence-transformers not available, using TF-IDF only")
+
         self.models: Dict[str, PersonaModel] = self._build_models()
 
     def reply(
@@ -64,8 +88,18 @@ class PersonaLogicEngine:
             }
 
         query_text = self._build_query(message, history or [])
-        query_vec = model.vectorizer.transform([query_text])
-        sims = cosine_similarity(query_vec, model.matrix).flatten()
+
+        # Use embedding-based retrieval if available (better semantic matching)
+        if self.embedding_model is not None and model.embeddings is not None:
+            query_embedding = self.embedding_model.encode([query_text], convert_to_numpy=True)
+            # Cosine similarity with normalized embeddings
+            sims = np.dot(model.embeddings, query_embedding.T).flatten()
+            strategy_type = "embedding_retrieval"
+        else:
+            # Fallback to TF-IDF
+            query_vec = model.vectorizer.transform([query_text])
+            sims = cosine_similarity(query_vec, model.matrix).flatten()
+            strategy_type = "tfidf_retrieval"
 
         top_k = max(1, min(top_k, len(model.samples)))
         top_indices = sims.argsort()[::-1][:top_k]
@@ -98,7 +132,7 @@ class PersonaLogicEngine:
         return {
             "text": chosen[0],
             "persona": persona_key,
-            "strategy": "tfidf_retrieval",
+            "strategy": strategy_type,
             "mood": model.current_mood,
             "source": {
                 "scenario": chosen[2].scenario,
@@ -185,6 +219,21 @@ class PersonaLogicEngine:
             matrix = vectorizer.fit_transform(texts)
             markov_model = train_from_corpus([s.reply for s in samples], order=2)
             mood_transitions = self._mood_transitions(persona)
+
+            # Compute embeddings if model is available (better semantic matching)
+            embeddings = None
+            if self.embedding_model is not None:
+                try:
+                    logger.info(f"[PersonaLogic] Computing embeddings for {persona} ({len(texts)} samples)...")
+                    embeddings = self.embedding_model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+                    # Normalize for cosine similarity (dot product on normalized = cosine)
+                    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                    embeddings = embeddings / (norms + 1e-9)
+                    logger.info(f"[PersonaLogic] Embeddings computed for {persona}: shape {embeddings.shape}")
+                except Exception as e:
+                    logger.warning(f"[PersonaLogic] Failed to compute embeddings for {persona}: {e}")
+                    embeddings = None
+
             models[persona] = PersonaModel(
                 samples=samples,
                 vectorizer=vectorizer,
@@ -192,6 +241,7 @@ class PersonaLogicEngine:
                 markov_text=markov_model,
                 mood_transitions=mood_transitions,
                 current_mood="neutral",
+                embeddings=embeddings,
             )
         return models
 
