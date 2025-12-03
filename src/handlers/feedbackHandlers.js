@@ -6,7 +6,9 @@
 
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { interactionLogger } from "../services/interactionLogger.js";
+import { getInteractionById } from "../db/models/interaction.js";
 import { logger } from "../util/logger.js";
+import ai from "../services/ai/index.js";
 
 // Feedback button custom ID prefixes
 export const FEEDBACK_PREFIX = {
@@ -39,17 +41,21 @@ export async function handleThumbsUp(interaction) {
   try {
     const interactionId = interaction.customId.replace(FEEDBACK_PREFIX.THUMBS_UP, "");
 
+    // Record feedback
     const result = await interactionLogger.recordFeedbackById(interactionId, {
       thumbsUp: true,
       thumbsDown: false,
     });
+
+    // Update bandit weights for the strategy that was used
+    await updateBanditFromFeedback(interactionId, true);
 
     if (result.ok) {
       // Update button to show feedback received
       await interaction.update({
         components: [createDisabledFeedbackRow("up")],
       });
-      logger.debug("[FEEDBACK] Thumbs up recorded", { interactionId });
+      logger.info("[FEEDBACK] Thumbs up recorded", { interactionId });
     } else {
       await interaction.reply({
         content: "Thanks for your feedback!",
@@ -58,10 +64,12 @@ export async function handleThumbsUp(interaction) {
     }
   } catch (error) {
     logger.error("[FEEDBACK] Thumbs up error", { error: error.message });
-    await interaction.reply({
-      content: "Thanks for your feedback!",
-      ephemeral: true,
-    });
+    try {
+      await interaction.reply({
+        content: "Thanks for your feedback!",
+        ephemeral: true,
+      });
+    } catch (e) { /* ignore */ }
   }
 }
 
@@ -72,17 +80,21 @@ export async function handleThumbsDown(interaction) {
   try {
     const interactionId = interaction.customId.replace(FEEDBACK_PREFIX.THUMBS_DOWN, "");
 
+    // Record feedback
     const result = await interactionLogger.recordFeedbackById(interactionId, {
       thumbsUp: false,
       thumbsDown: true,
     });
+
+    // Update bandit weights for the strategy that was used (negative)
+    await updateBanditFromFeedback(interactionId, false);
 
     if (result.ok) {
       // Update button to show feedback received
       await interaction.update({
         components: [createDisabledFeedbackRow("down")],
       });
-      logger.debug("[FEEDBACK] Thumbs down recorded", { interactionId });
+      logger.info("[FEEDBACK] Thumbs down recorded", { interactionId });
     } else {
       await interaction.reply({
         content: "Thanks for your feedback! We'll work on improving.",
@@ -91,10 +103,53 @@ export async function handleThumbsDown(interaction) {
     }
   } catch (error) {
     logger.error("[FEEDBACK] Thumbs down error", { error: error.message });
-    await interaction.reply({
-      content: "Thanks for your feedback!",
-      ephemeral: true,
-    });
+    try {
+      await interaction.reply({
+        content: "Thanks for your feedback!",
+        ephemeral: true,
+      });
+    } catch (e) { /* ignore */ }
+  }
+}
+
+/**
+ * Update bandit weights based on feedback
+ * @param {string} interactionId - MongoDB ObjectId
+ * @param {boolean} positive - Whether feedback was positive
+ */
+async function updateBanditFromFeedback(interactionId, positive) {
+  try {
+    // Get the interaction to find which strategy was used
+    const interactionResult = await getInteractionById(interactionId);
+    if (!interactionResult.ok || !interactionResult.data) {
+      logger.debug("[FEEDBACK] Interaction not found for bandit update");
+      return;
+    }
+
+    const strategy = interactionResult.data.strategy;
+    if (!strategy) {
+      logger.debug("[FEEDBACK] No strategy recorded for interaction");
+      return;
+    }
+
+    // Update bandit with reward (1.0 for positive, 0.0 for negative)
+    const reward = positive ? 1.0 : 0.0;
+
+    try {
+      await ai.hybrid.updateBandit({
+        arm: strategy,
+        reward: reward,
+      });
+      logger.info("[FEEDBACK] Bandit updated", { strategy, reward, interactionId });
+    } catch (banditError) {
+      // Non-critical - log but don't fail
+      logger.warn("[FEEDBACK] Bandit update failed (non-critical)", {
+        error: banditError.message,
+        strategy
+      });
+    }
+  } catch (error) {
+    logger.error("[FEEDBACK] Error updating bandit", { error: error.message });
   }
 }
 

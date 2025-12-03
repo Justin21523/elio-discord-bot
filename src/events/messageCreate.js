@@ -12,6 +12,8 @@
 import { Events } from 'discord.js';
 import { createAutoReplyManager } from '../services/autoReply.js';
 import { fixThirdPersonPronouns, detectThirdPerson, removeFormatLeakage, ensureCompleteSentence } from '../utils/pronounFilter.js';
+import { createFeedbackButtons } from '../handlers/feedbackHandlers.js';
+import { interactionLogger } from '../services/interactionLogger.js';
 
 let autoReplyManager = null;
 
@@ -188,21 +190,58 @@ export async function execute(message, services) {
       responseText = responseText.substring(0, 1997) + '...';
     }
 
+    // Get the strategy used for feedback tracking
+    const strategyUsed = result.data?.strategy || result.data?.metadata?.strategy || 'unknown';
+
+    // Log interaction immediately to get ID for feedback buttons
+    let interactionId = null;
+    try {
+      const logResult = await interactionLogger.logImmediate({
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.author.id,
+        username: message.author.username,
+        persona: persona.name,
+        userMessage: message.content,
+        botResponse: responseText,
+        responseSource: 'hybrid',
+        similarity: result.data?.confidence || null,
+        strategy: strategyUsed,
+      });
+      if (logResult.ok && logResult.data?.id) {
+        interactionId = logResult.data.id;
+      }
+    } catch (logError) {
+      console.log('[WARN] Failed to log interaction:', logError.message);
+    }
+
+    // Create feedback buttons if we have an interaction ID
+    const feedbackRow = interactionId ? createFeedbackButtons(interactionId) : null;
+
     // Send response via webhook to show persona's avatar and name
     try {
+      const messageOptions = {
+        content: `<@${message.author.id}> ${responseText}`,
+      };
+      if (feedbackRow) {
+        messageOptions.components = [feedbackRow];
+      }
+
       await services.webhooks.personaSay(
         message.channelId,
         {
           name: persona.name,
           avatar: persona.avatar
         },
-        {
-          content: `<@${message.author.id}> ${responseText}`
-        }
+        messageOptions
       );
     } catch (webhookError) {
       console.log(`[WARN] Webhook failed, using reply fallback:`, webhookError.message);
-      await message.reply(responseText);
+      const replyOptions = { content: responseText };
+      if (feedbackRow) {
+        replyOptions.components = [feedbackRow];
+      }
+      await message.reply(replyOptions);
     }
 
     // Record conversation (CRITICAL: per-user isolation)
@@ -226,7 +265,7 @@ export async function execute(message, services) {
     // Track bot reply for multi-turn conversation
     autoReplyManager.recordBotReply(message.channelId, message.author.id, persona.name);
 
-    console.log(`[INT] Auto-replied as ${persona.name} (${responseText.length} chars)${hadThirdPerson ? ' [filtered]' : ''}`);
+    console.log(`[INT] Auto-replied as ${persona.name} (${responseText.length} chars, strategy: ${strategyUsed})${hadThirdPerson ? ' [filtered]' : ''}`);
 
   } catch (error) {
     console.error('[ERR] messageCreate auto-reply error:', error);
