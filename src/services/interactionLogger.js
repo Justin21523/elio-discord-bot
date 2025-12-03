@@ -4,7 +4,7 @@
  */
 
 import { logInteraction, recordFeedback, findRecentInteraction, getStats } from '../db/models/interaction.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../util/logger.js';
 
 class InteractionLogger {
   constructor() {
