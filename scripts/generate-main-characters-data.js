@@ -5,6 +5,7 @@
  * Estimated cost: ~$2 (GPT-4o-mini is cheap!)
  */
 
+import 'dotenv/config';
 import OpenAI from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
@@ -12,6 +13,11 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error('❌ OPENAI_API_KEY not set! Please add it to .env file.');
+  process.exit(1);
+}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const MODEL = 'gpt-4o-mini';  // Cheap and fast!
