@@ -261,8 +261,13 @@ async function handleDMChat(message, session, services) {
     }));
 
     // Try CPU-only personaLogic service first (preferred)
-    if (ai?.personaLogic) {
+    if (ai?.personaLogic?.reply) {
       try {
+        logger.info("[DM] Calling personaLogic.reply", {
+          persona: activePersona?.name || "Elio",
+          messageLength: message.content.length,
+        });
+
         const logicRes = await ai.personaLogic.reply({
           persona: activePersona?.name || "Elio",
           message: message.content,
@@ -271,35 +276,34 @@ async function handleDMChat(message, session, services) {
           maxLen: 90,
         });
 
+        logger.info("[DM] personaLogic.reply result", {
+          ok: logicRes?.ok,
+          hasText: !!logicRes?.data?.text,
+          strategy: logicRes?.data?.strategy,
+        });
+
         if (logicRes?.ok && logicRes.data?.text) {
           response = logicRes.data.text.trim();
-          logger.debug("[DM] Used personaLogic service", {
+          logger.info("[DM] Using personaLogic response", {
             strategy: logicRes.data.strategy,
+            responseLength: response.length,
           });
         }
       } catch (error) {
-        logger.warn("[DM] personaLogic failed, trying fallback", {
+        logger.error("[DM] personaLogic.reply threw error", {
           error: error.message,
+          stack: error.stack,
         });
       }
+    } else {
+      logger.warn("[DM] personaLogic.reply not available", {
+        hasPersonaLogic: !!ai?.personaLogic,
+        hasReply: !!ai?.personaLogic?.reply,
+      });
     }
 
-    // Fallback to persona.compose if personaLogic failed
-    if (!response && activePersona && ai?.persona) {
-      try {
-        const prompt = `Conversation so far:\n${conversationContext}\n\nLatest message: ${message.content}\n\nRespond in character, naturally continuing the conversation (1-3 sentences).`;
-
-        const result = await ai.persona.compose(prompt, activePersona, {
-          maxTokens: 100,
-        });
-
-        if (result?.ok && result.data?.text) {
-          response = result.data.text.trim();
-        }
-      } catch (error) {
-        logger.warn("[DM] persona.compose failed", { error: error.message });
-      }
-    }
+    // Skip persona.compose fallback in CPU-only mode (it requires LLM)
+    // Go directly to template fallback
 
     // Final fallback: simple template response
     if (!response) {
