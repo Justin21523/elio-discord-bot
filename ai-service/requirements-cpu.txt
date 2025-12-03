@@ -7,6 +7,13 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.5.1+cpu
 
+# Transformers (required imports, but won't load large models)
+transformers>=4.40.0
+sentence-transformers>=2.5.0
+tokenizers>=0.15.0
+safetensors>=0.4.0
+accelerate>=0.28.0
+
 # Web Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
