@@ -46,9 +46,9 @@ services:
       MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
       DB_NAME: ${DB_NAME:-communiverse_bot}
 
-      # AI (off by default; enable with profile + env)
-      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://localhost:8000}
-      AI_ENABLED: ${AI_ENABLED:-false}
+      # AI Service (points to ai-service-cpu or ai-service container)
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service-cpu:8000}
+      AI_ENABLED: ${AI_ENABLED:-true}
 
       # Bot config
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -82,7 +82,59 @@ services:
       start_period: 40s
 
   # -------------------------
-  # Optional: Python AI Service (GPU). Enable with: docker-compose --profile ai up -d ai-service bot
+  # CPU-only AI Service for traditional ML (BM25, N-gram, SVM, Naive Bayes)
+  # Enable with: docker-compose --profile ai-cpu up -d
+  # -------------------------
+  ai-service-cpu:
+    profiles: ["ai-cpu"]
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile.cpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "9091:9091"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
+      MONGODB_DB: ${DB_NAME:-communiverse_bot}
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # CPU-only mode
+      USE_GPU: "false"
+      USE_LLM: "false"
+      USE_VLM: "false"
+      USE_EMBEDDINGS: "false"
+      # Traditional ML only
+      USE_BM25: "true"
+      USE_NGRAM: "true"
+      USE_INTENT: "true"
+      USE_SENTIMENT: "true"
+    volumes:
+      - ./ai-service/logs:/app/logs
+      - ./data:/app/data:ro
+    networks:
+      - elioverse-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # -------------------------
+  # Optional: Python AI Service (GPU). Enable with: docker-compose --profile ai up -d
   # -------------------------
   ai-service:
     profiles: ["ai"]

@@ -1,0 +1,44 @@
+# ============================================================================
+# Elioverse Bot AI Service - CPU-only Dockerfile
+# For traditional ML models (BM25, N-gram, SVM, Naive Bayes) without GPU
+# ============================================================================
+
+FROM python:3.10-slim
+
+# Set non-interactive installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for caching
+COPY requirements-cpu.txt .
+
+# Install Python dependencies (CPU-only)
+RUN pip3 install --no-cache-dir -r requirements-cpu.txt
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/models /app/cache
+
+# Expose ports
+EXPOSE 8000 9091
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run the application
+CMD ["uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8000"]
