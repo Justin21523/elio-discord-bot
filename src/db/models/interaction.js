@@ -3,7 +3,8 @@
  * Stores bot-user conversations for continuous learning and concept drift mitigation
  */
 
-import { getDb, ObjectId } from '../connection.js';
+import { getDb } from '../mongo.js';
+import { ObjectId } from 'mongodb';
 
 const COLLECTION = 'user_interactions';
 
