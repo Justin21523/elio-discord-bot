@@ -76,24 +76,9 @@ class PersonaLogicEngine:
             base_reply = sample.reply
             similarity = float(sims[idx])
 
-            # Use original reply if similarity is high (>0.3), otherwise blend with Markov
-            if similarity > 0.3:
-                # High similarity - use the actual training reply (more relevant)
-                final_text = base_reply
-            else:
-                # Lower similarity - blend with Markov for variety
-                markov_text = model.markov_text.generate(
-                    seed=f"{query_text} {base_reply}",
-                    max_len=max_len,
-                    temperature=0.9,
-                    repetition_penalty=1.15,
-                )
-                final_text = self._blend_text(
-                    persona_key,
-                    base_reply,
-                    markov_text,
-                    mood=model.current_mood,
-                )
+            # ALWAYS use the actual training reply - Markov blending produces garbage
+            # The training data already has high-quality, contextual responses
+            final_text = base_reply
 
             # Apply style wrapping to final text
             styled = self._style_wrap(persona_key, final_text, model.current_mood)
@@ -113,7 +98,7 @@ class PersonaLogicEngine:
         return {
             "text": chosen[0],
             "persona": persona_key,
-            "strategy": "tfidf_markov",
+            "strategy": "tfidf_retrieval",
             "mood": model.current_mood,
             "source": {
                 "scenario": chosen[2].scenario,
