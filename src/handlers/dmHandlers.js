@@ -242,35 +242,77 @@ async function handleDMChat(message, session, services) {
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join("\n");
 
-    // Generate AI response
+    // Generate AI response using CPU-only personaLogic service
     let response;
 
-    if (session.persona) {
-      // Use persona for styled response
-      const prompt = `Conversation so far:\n${conversationContext}\n\nLatest message: ${message.content}\n\nRespond in character, naturally continuing the conversation (1-3 sentences).`;
-
-      const result = await ai.persona.compose(prompt, session.persona);
-
-      if (!result.ok || !result.data?.text) {
-        throw new Error("Persona AI generation failed");
+    // Get or default to Elio persona for DM
+    let activePersona = session.persona;
+    if (!activePersona) {
+      const defaultPersonaResult = await getPersona("Elio");
+      if (defaultPersonaResult.ok) {
+        activePersona = defaultPersonaResult.data;
       }
+    }
 
-      response = result.data.text;
-    } else {
-      // Use generic AI
-      const prompt = `You are a friendly AI assistant in a DM conversation. Previous context:\n${conversationContext}\n\nRespond naturally and helpfully (1-3 sentences).`;
+    // Build history for personaLogic
+    const historyPayload = session.conversationHistory.slice(-5).map((h) => ({
+      role: h.role,
+      content: h.content,
+    }));
 
-      const result = await ai.llm.generate({
-        prompt: prompt,
-        maxTokens: 200,
-        temperature: 0.8,
-      });
+    // Try CPU-only personaLogic service first (preferred)
+    if (ai?.personaLogic) {
+      try {
+        const logicRes = await ai.personaLogic.reply({
+          persona: activePersona?.name || "Elio",
+          message: message.content,
+          history: historyPayload,
+          topK: 5,
+          maxLen: 90,
+        });
 
-      if (!result.ok || !result.data?.text) {
-        throw new Error("AI generation failed");
+        if (logicRes?.ok && logicRes.data?.text) {
+          response = logicRes.data.text.trim();
+          logger.debug("[DM] Used personaLogic service", {
+            strategy: logicRes.data.strategy,
+          });
+        }
+      } catch (error) {
+        logger.warn("[DM] personaLogic failed, trying fallback", {
+          error: error.message,
+        });
       }
+    }
 
-      response = result.data.text;
+    // Fallback to persona.compose if personaLogic failed
+    if (!response && activePersona && ai?.persona) {
+      try {
+        const prompt = `Conversation so far:\n${conversationContext}\n\nLatest message: ${message.content}\n\nRespond in character, naturally continuing the conversation (1-3 sentences).`;
+
+        const result = await ai.persona.compose(prompt, activePersona, {
+          maxTokens: 100,
+        });
+
+        if (result?.ok && result.data?.text) {
+          response = result.data.text.trim();
+        }
+      } catch (error) {
+        logger.warn("[DM] persona.compose failed", { error: error.message });
+      }
+    }
+
+    // Final fallback: simple template response
+    if (!response) {
+      const fallbackResponses = [
+        "That's interesting! Tell me more about that.",
+        "I see! What else is on your mind?",
+        "Hmm, that's a good point. What do you think?",
+        "Thanks for sharing! Anything else you'd like to chat about?",
+        "I hear you! What's next?",
+      ];
+      response =
+        fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+      logger.debug("[DM] Used fallback response");
     }
 
     // Add AI response to history
@@ -337,50 +379,57 @@ async function startDMGame(message, session, services, args) {
 }
 
 /**
- * Start AI-generated trivia game
+ * Start AI-generated trivia game (CPU-only using pre-defined questions)
  */
 async function startTriviaGame(message, session, services) {
   try {
-    const { ai } = services;
+    // CPU-only mode: Use pre-defined trivia questions instead of LLM generation
+    const triviaQuestions = [
+      {
+        question: "What is the name of the main character in Communiverse?",
+        options: ["A) Glordon", "B) *Elio*", "C) Caleb", "D) Olga"],
+        answer: "B",
+      },
+      {
+        question: "Which persona is known for their cosmic wisdom?",
+        options: ["A) Caleb", "B) Olga", "C) *Glordon*", "D) Elio"],
+        answer: "C",
+      },
+      {
+        question: "What type of bot is Elio?",
+        options: [
+          "A) Music bot",
+          "B) *AI-powered Discord bot*",
+          "C) Moderation bot",
+          "D) Gaming bot",
+        ],
+        answer: "B",
+      },
+      {
+        question: "What technology powers the Communiverse responses?",
+        options: [
+          "A) Simple rules",
+          "B) *Machine Learning*",
+          "C) Random selection",
+          "D) Manual responses",
+        ],
+        answer: "B",
+      },
+      {
+        question: "Which ML technique is used for text search?",
+        options: ["A) Neural Networks", "B) Random Forest", "C) *BM25*", "D) K-means"],
+        answer: "C",
+      },
+    ];
 
-    // Generate trivia question using RAG + LLM
-    let context = "";
-
-    // Try to get context from RAG
-    if (ai.rag) {
-      try {
-        const ragResult = await ai.rag.search({
-          query: "Communiverse characters trivia facts",
-          topK: 2,
-          generateAnswer: false,
-        });
-
-        if (ragResult.ok && ragResult.data.hits?.length > 0) {
-          context = ragResult.data.hits[0].chunk.substring(0, 300);
-        }
-      } catch (error) {
-        logger.warn("[DM] RAG failed for trivia", { error: error.message });
-      }
-    }
-
-    const prompt = context
-      ? `Based on this information:\n${context}\n\nCreate a fun multiple choice trivia question with 4 options (A, B, C, D). Mark the correct answer with *. Format:\nQuestion: ...\nA) ...\nB) ...\nC) *correct answer*\nD) ...`
-      : `Create a fun trivia question about space, aliens, or the Communiverse with 4 multiple choice options (A, B, C, D). Mark the correct answer with *.`;
-
-    const result = await ai.llm.generate({
-      prompt: prompt,
-      maxTokens: 250,
-      temperature: 0.7,
-    });
-
-    if (!result.ok || !result.data?.text) {
-      throw new Error("Failed to generate trivia");
-    }
-
-    const triviaText = result.data.text;
+    // Pick a random question
+    const trivia =
+      triviaQuestions[Math.floor(Math.random() * triviaQuestions.length)];
+    const triviaText = `**Question:** ${trivia.question}\n\n${trivia.options.join("\n")}`;
 
     // Store trivia question in game state
     session.gameState.currentQuestion = triviaText;
+    session.gameState.correctAnswer = trivia.answer;
     session.gameState.waitingForAnswer = true;
 
     const embed = new EmbedBuilder()
@@ -425,7 +474,7 @@ async function startStoryGame(message, session, services) {
 }
 
 /**
- * Start AI story generation
+ * Start AI story generation (CPU-only using Markov/template system)
  */
 async function startDMStory(message, session, services, args) {
   const theme = args.slice(1).join(" ") || "space adventure";
@@ -438,19 +487,43 @@ async function startDMStory(message, session, services, args) {
   try {
     const { ai } = services;
 
-    const prompt = `Write the beginning of an interactive story about: "${theme}". Make it engaging and end with a choice for the reader (1-2 paragraphs).`;
+    // CPU-only: Try Markov chain story generation
+    let storyText = null;
 
-    const result = await ai.llm.generate({
-      prompt: prompt,
-      maxTokens: 300,
-      temperature: 0.9,
-    });
-
-    if (!result.ok || !result.data?.text) {
-      throw new Error("Story generation failed");
+    if (ai?.markov) {
+      try {
+        const markovRes = await ai.markov.generate({
+          seed: theme,
+          maxLength: 150,
+        });
+        if (markovRes?.ok && markovRes.data?.text) {
+          storyText = markovRes.data.text;
+        }
+      } catch (error) {
+        logger.warn("[DM] Markov story generation failed", {
+          error: error.message,
+        });
+      }
     }
 
-    const storyText = result.data.text;
+    // Fallback: Use pre-defined story templates
+    if (!storyText) {
+      const storyTemplates = {
+        "space adventure": `You find yourself aboard a mysterious spacecraft drifting through the cosmos. The stars twinkle outside the viewport as you notice two doors ahead.\n\n**Choice A:** Open the door marked "Bridge"\n**Choice B:** Open the door marked "Engine Room"`,
+        adventure: `You stand at the edge of an ancient forest. The path ahead splits into two directions. To the left, you hear rushing water. To the right, a faint glow flickers through the trees.\n\n**Choice A:** Follow the sound of water\n**Choice B:** Investigate the mysterious glow`,
+        mystery: `A strange letter arrived this morning with no return address. Inside, a cryptic message reads: "The truth lies where shadows meet light."\n\n**Choice A:** Visit the old lighthouse\n**Choice B:** Search the abandoned library`,
+        default: `Your adventure begins in a world of endless possibilities. Before you lie two paths, each leading to unknown destinations.\n\n**Choice A:** Take the path of courage\n**Choice B:** Take the path of wisdom`,
+      };
+
+      const themeLower = theme.toLowerCase();
+      storyText =
+        storyTemplates[themeLower] ||
+        storyTemplates[
+          Object.keys(storyTemplates).find((k) => themeLower.includes(k))
+        ] ||
+        storyTemplates.default;
+    }
+
     session.storyContext.push({ text: storyText, timestamp: Date.now() });
 
     const embed = new EmbedBuilder()
@@ -458,7 +531,7 @@ async function startDMStory(message, session, services, args) {
       .setTitle(`📖 Your Story: ${theme}`)
       .setDescription(storyText)
       .setFooter({
-        text: "Reply with your choice to continue the story!",
+        text: "Reply with A or B to continue the story!",
       });
 
     await message.channel.send({ embeds: [embed] });
