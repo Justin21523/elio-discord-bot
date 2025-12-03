@@ -877,11 +877,11 @@ async function generateSmartReply(message, decision, services, config) {
       });
 
       // Use persona.compose with balanced token limit
-      // 200 tokens = ~150 words = 2-4 sentences (good balance between speed and completeness)
+      // 100 tokens = ~75 words = 2-3 sentences (matches personaLogic maxLen: 90)
       const aiResult = await ai.persona.compose(
         fullPrompt,
         selectedPersona,
-        200 // Increased from 100 to reduce truncation while maintaining speed
+        { maxTokens: 100 } // Keep consistent with personaLogic.reply maxLen: 90
       );
 
       if (!aiResult || !aiResult.ok) {
