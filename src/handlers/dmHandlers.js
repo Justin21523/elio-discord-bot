@@ -217,6 +217,16 @@ async function handlePersonaCommand(message, session, services, args) {
 async function handleDMChat(message, session, services) {
   const { ai } = services;
 
+  // Debug: log ai object structure
+  logger.info("[DM] ai object check", {
+    hasAi: !!ai,
+    aiKeys: ai ? Object.keys(ai) : [],
+    hasPersonaLogic: !!ai?.personaLogic,
+    personaLogicKeys: ai?.personaLogic ? Object.keys(ai.personaLogic) : [],
+    hasReply: !!ai?.personaLogic?.reply,
+    replyType: typeof ai?.personaLogic?.reply,
+  });
+
   if (!ai) {
     return await message.channel.send(
       "❌ AI service is currently unavailable. Please try again later."
