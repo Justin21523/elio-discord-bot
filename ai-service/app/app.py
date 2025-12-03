@@ -50,13 +50,12 @@ async def lifespan(app: FastAPI):
             logger.info("[BOOT] Initializing CPU-only traditional ML services...")
 
             # Initialize lightweight services for traditional ML
-            from app.services.markov import MarkovChainService
-            from app.services.ir import IRService
-            from app.services.persona_logic import PersonaLogicService
+            from app.services.markov import MarkovModel
+            from app.services.persona_logic import PersonaLogicEngine
+            # ir.py uses standalone functions, no class to initialize
 
-            app.state.markov_service = MarkovChainService()
-            app.state.ir_service = IRService()
-            app.state.persona_logic_service = PersonaLogicService()
+            app.state.markov_model = MarkovModel()
+            app.state.persona_logic_engine = PersonaLogicEngine()
 
             # Set placeholders for GPU services
             app.state.model_manager = None
