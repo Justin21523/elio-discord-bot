@@ -19,8 +19,123 @@ import { createAutoReplyManager } from '../services/autoReply.js';
 import { fixThirdPersonPronouns, detectThirdPerson, removeFormatLeakage, ensureCompleteSentence } from '../utils/pronounFilter.js';
 import { createFeedbackButtons } from '../handlers/feedbackHandlers.js';
 import { interactionLogger } from '../services/interactionLogger.js';
-import { generatePersonaReply, isLlamaEnabled } from '../services/ai/adapters/llamaCppAdapter.js';
+import { generatePersonaReply, isLlamaEnabled, checkLlamaHealth } from '../services/ai/adapters/llamaCppAdapter.js';
 import { USE_LLAMA_SERVER } from '../config.js';
+import { localPersonaReply } from '../services/ai/localPersonaFallback.js';
+
+// Cache llama.cpp server availability (check every 60 seconds)
+let llamaServerAvailable = null;
+let lastLlamaCheck = 0;
+const LLAMA_CHECK_INTERVAL_MS = 60000; // 1 minute
+
+async function isLlamaServerAvailable() {
+  const now = Date.now();
+  // Use cached result if checked recently
+  if (llamaServerAvailable !== null && (now - lastLlamaCheck) < LLAMA_CHECK_INTERVAL_MS) {
+    return llamaServerAvailable;
+  }
+
+  // Check llama.cpp server health
+  if (USE_LLAMA_SERVER && isLlamaEnabled()) {
+    const health = await checkLlamaHealth();
+    llamaServerAvailable = health.ok;
+    lastLlamaCheck = now;
+    if (!health.ok) {
+      console.log(`[INT] llama.cpp server unavailable: ${health.status}`);
+    }
+    return llamaServerAvailable;
+  }
+
+  return false;
+}
+
+/**
+ * Detect the addressee (who the user is talking to) when multiple personas are mentioned.
+ * Uses linguistic patterns to identify the intended recipient.
+ *
+ * Examples:
+ * - "Hey Bryce, how do you think of Caleb?" → Bryce (vocative at start)
+ * - "I'm so tired now, Caleb" → Caleb (vocative at end with comma)
+ * - "Caleb, what do you think?" → Caleb (vocative at start with comma)
+ * - "What does Bryce think about Caleb?" → neither addressed directly (use first mentioned as subject)
+ *
+ * @param {string} content - Message content (without @mentions)
+ * @param {Array<{name: string}>} personaList - List of personas to check
+ * @returns {{persona: string|null, reason: string}}
+ */
+function detectAddressee(content, personaList) {
+  const contentLower = content.toLowerCase();
+  const personaNames = personaList.map(p => p.name.toLowerCase());
+
+  // Find all persona mentions with their positions
+  const mentions = [];
+  for (const p of personaList) {
+    const nameLower = p.name.toLowerCase();
+    const regex = new RegExp(`\\b${nameLower}\\b`, 'gi');
+    let match;
+    while ((match = regex.exec(contentLower)) !== null) {
+      mentions.push({
+        name: p.name,
+        position: match.index,
+        context: content.substring(Math.max(0, match.index - 10), match.index + p.name.length + 10),
+      });
+    }
+  }
+
+  if (mentions.length === 0) return { persona: null, reason: 'no_mention' };
+  if (mentions.length === 1) return { persona: mentions[0].name, reason: 'single_mention' };
+
+  // Multiple mentions - determine addressee using linguistic patterns
+
+  // Pattern 1: Vocative at start with comma ("Hey Bryce,", "Bryce,", "Yo Caleb,")
+  const startVocativeMatch = contentLower.match(/^(?:hey|hi|yo|oh|dear|excuse me)?\s*(\w+)\s*,/i);
+  if (startVocativeMatch) {
+    const potentialName = startVocativeMatch[1].toLowerCase();
+    for (const p of personaList) {
+      if (p.name.toLowerCase() === potentialName) {
+        return { persona: p.name, reason: 'vocative_start' };
+      }
+    }
+  }
+
+  // Pattern 2: Vocative at end with comma (", Caleb" at end of sentence)
+  const endVocativeMatch = contentLower.match(/,\s*(\w+)\s*[.!?]?\s*$/i);
+  if (endVocativeMatch) {
+    const potentialName = endVocativeMatch[1].toLowerCase();
+    for (const p of personaList) {
+      if (p.name.toLowerCase() === potentialName) {
+        return { persona: p.name, reason: 'vocative_end' };
+      }
+    }
+  }
+
+  // Pattern 3: Direct address patterns ("tell me [Name]", "you think [Name]?")
+  // These suggest [Name] is the topic, not addressee
+
+  // Pattern 4: "about [Name]", "of [Name]", "think of [Name]" - these are objects, not addressees
+  for (const mention of mentions) {
+    const beforeText = content.substring(0, mention.position).toLowerCase();
+    // Check if persona is an object of preposition
+    if (/(?:about|of|with|from|to|for|against)\s*$/.test(beforeText.trim())) {
+      mention.isObject = true;
+    }
+  }
+
+  // Filter out object mentions
+  const potentialAddressees = mentions.filter(m => !m.isObject);
+
+  if (potentialAddressees.length === 1) {
+    return { persona: potentialAddressees[0].name, reason: 'filtered_object' };
+  }
+
+  // Default: use the first mentioned persona that isn't an object
+  if (potentialAddressees.length > 0) {
+    return { persona: potentialAddressees[0].name, reason: 'first_non_object' };
+  }
+
+  // Ultimate fallback: first mentioned overall
+  return { persona: mentions[0].name, reason: 'first_mentioned' };
+}
 
 let autoReplyManager = null;
 
@@ -100,20 +215,21 @@ export async function execute(message, services) {
       // @mentioned - check for persona name in message
       const contentWithoutMention = message.content
         .replace(/<@!?\d+>/g, '') // Remove @mentions
-        .toLowerCase()
         .trim();
 
-      // Get all personas and check if any name is in the message
+      // Get all personas and use smart addressee detection
       const personaList = await services.personas.listPersonas();
       if (personaList.ok) {
-        for (const p of personaList.data) {
-          const namePattern = new RegExp(`\\b${p.name.toLowerCase()}\\b`, 'i');
-          if (namePattern.test(contentWithoutMention)) {
-            selectedPersona = p.name;
-            reason = 'bot_mention_with_persona';
-            console.log(`[INT] @mention + persona name detected: ${p.name}`);
-            break;
-          }
+        // Use addressee detection to find who the user is talking to
+        const { persona: detectedPersona, reason: detectionReason } = detectAddressee(
+          contentWithoutMention,
+          personaList.data
+        );
+
+        if (detectedPersona) {
+          selectedPersona = detectedPersona;
+          reason = `addressee_${detectionReason}`;
+          console.log(`[INT] @mention + addressee detected: ${detectedPersona} (reason: ${detectionReason})`);
         }
       }
 
@@ -181,8 +297,11 @@ export async function execute(message, services) {
     let result;
     let strategyUsedOverride = null;
 
-    // Check if llama.cpp is enabled - use it as primary for all personas
-    if (USE_LLAMA_SERVER && isLlamaEnabled()) {
+    // Check if llama.cpp server is actually available (cached, 60s TTL)
+    const llamaAvailable = await isLlamaServerAvailable();
+
+    // Use llama.cpp only if it's actually reachable
+    if (llamaAvailable) {
       console.log(`[INT] Using llama.cpp for ${persona.name} (may take 20-30s)`);
 
       // Use llama.cpp with persona's system_prompt
@@ -205,33 +324,10 @@ export async function execute(message, services) {
         strategyUsedOverride = 'llama.cpp';
         console.log(`[INT] llama.cpp replied in ${llamaResult.data.latencyMs}ms`);
       } else {
-        console.warn('[WARN] llama.cpp failed, falling back to hybrid:', llamaResult.error?.message);
-        // Fallback to hybrid if llama.cpp fails
-        result = await services.ai.hybrid.reply({
-          persona: persona.name,
-          message: message.content,
-          history: conversationContext,
-          userId: message.author.id,
-          channelId: message.channelId,
-          topK: 5,
-          maxLen: 80
-        });
-      }
-    } else {
-      // Use hybrid ensemble system (Markov + TF-IDF + HMM + Thompson Sampling + more)
-      result = await services.ai.hybrid.reply({
-        persona: persona.name,
-        message: message.content,
-        history: conversationContext,
-        userId: message.author.id,
-        channelId: message.channelId,
-        topK: 5,
-        maxLen: 80
-      });
-
-      // Fallback: if hybrid fails, use basic persona logic
-      if (!result.ok) {
-        console.warn('[WARN] Hybrid reply failed, falling back to personaLogic');
+        console.warn('[WARN] llama.cpp failed, falling back to personaLogic:', llamaResult.error?.message);
+        // Invalidate cache so next request re-checks
+        llamaServerAvailable = null;
+        // Fallback directly to personaLogic (uses training corpus retrieval)
         result = await services.ai.personaLogic.reply({
           persona: persona.name,
           message: message.content,
@@ -239,6 +335,30 @@ export async function execute(message, services) {
           topK: 5,
           maxLen: 80
         });
+        strategyUsedOverride = 'personaLogic_fallback';
+      }
+    } else {
+      // llama.cpp not available - try personaLogic first, then local fallback
+      console.log(`[INT] llama.cpp unavailable, trying personaLogic for ${persona.name}`);
+
+      try {
+        result = await services.ai.personaLogic.reply({
+          persona: persona.name,
+          message: message.content,
+          history: conversationContext,
+          topK: 5,
+          maxLen: 80
+        });
+      } catch (personaLogicErr) {
+        console.warn('[WARN] personaLogic threw error:', personaLogicErr.message);
+        result = { ok: false, error: { message: personaLogicErr.message } };
+      }
+
+      // If personaLogic fails, use LOCAL fallback (no external service needed)
+      if (!result.ok) {
+        console.warn('[WARN] personaLogic failed, using local training data fallback');
+        result = await localPersonaReply(persona.name, message.content, { topK: 5 });
+        strategyUsedOverride = 'local_fallback';
       }
     }
 
