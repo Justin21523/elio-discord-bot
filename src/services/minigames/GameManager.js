@@ -5,6 +5,10 @@
 
 import { getCollection } from "../../db/mongo.js";
 import { logger } from "../../util/logger.js";
+import TrainingDataLoader from "./TrainingDataLoader.js";
+
+// Training data loading status
+let trainingDataLoaded = false;
 
 // Game registry - import game implementations here
 import TriviaGame from "./games/TriviaGame.js";
@@ -46,9 +50,38 @@ const START_COOLDOWN_MS = COOLDOWNS.minigameStartMs || 10_000;
 
 export class GameManager {
   /**
+   * Initialize GameManager - load training data
+   * Call this once at startup
+   */
+  static async initialize() {
+    if (!trainingDataLoaded) {
+      logger.info("[GameManager] Initializing training data loader...");
+      const result = await TrainingDataLoader.loadAll();
+      if (result.ok) {
+        trainingDataLoaded = true;
+        logger.info("[GameManager] Training data loaded", result.data);
+      } else {
+        logger.warn("[GameManager] Failed to load training data, using fallback static data");
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Get training data loader instance
+   */
+  static getTrainingData() {
+    return TrainingDataLoader;
+  }
+
+  /**
    * Start a new game session
    */
   static async startGame(gameType, channel, user, options = {}) {
+    // Ensure training data is loaded
+    if (!trainingDataLoaded) {
+      await this.initialize();
+    }
     try {
       const now = Date.now();
       const lastStart = startCooldowns.get(channel.id) || 0;

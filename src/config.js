@@ -53,6 +53,15 @@ export const AI_SERVICE_TIMEOUT_MS = parseInt(
 export const AI_TIMEOUT_MS = parseInt(process.env.AI_TIMEOUT_MS || "180000", 10);
 export const AI_MAX_TOKENS = parseInt(process.env.AI_MAX_TOKENS || "2048", 10);
 
+// llama.cpp Server Configuration (GPU inference)
+export const LLAMA_SERVER_URL =
+  process.env.LLAMA_SERVER_URL || "http://live4.dothost.net:8080";
+export const LLAMA_TIMEOUT_MS = parseInt(
+  process.env.LLAMA_TIMEOUT_MS || "180000",
+  10
+);
+export const USE_LLAMA_SERVER = process.env.USE_LLAMA_SERVER === "true";
+
 // RAG Configuration
 export const RAG_TOP_K = parseInt(process.env.RAG_TOP_K || "5", 10);
 export const RAG_MIN_SCORE = parseFloat(process.env.RAG_MIN_SCORE || "0.7");

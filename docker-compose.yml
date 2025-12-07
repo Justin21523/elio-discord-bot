@@ -200,10 +200,97 @@ services:
       retries: 3
       start_period: 90s
 
+  # -------------------------
+  # 4GB VRAM GPU AI Service (GTX 1050 Ti, GTX 1650, etc.)
+  # Lightweight LLM support with quantization
+  # Enable with: docker-compose --profile ai-4gb up -d
+  # -------------------------
+  ai-service-4gb:
+    profiles: ["ai-4gb"]
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile.4gb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "9091:9091"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
+      MONGODB_DB: ${DB_NAME:-communiverse_bot}
+      HOST: 0.0.0.0
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # GPU mode with 4-bit quantization
+      CPU_ONLY: "false"
+      USE_GPU: "true"
+      USE_LLM: "true"
+      USE_VLM: "false"
+      USE_EMBEDDINGS: "true"
+      USE_4BIT: "true"
+      USE_8BIT: "false"
+      DEVICE: cuda
+
+      # Lightweight model (auto-select based on VRAM)
+      LLM_MODEL: phi3-mini
+
+      # Traditional ML (always enabled)
+      USE_BM25: "true"
+      USE_NGRAM: "true"
+      USE_INTENT: "true"
+      USE_SENTIMENT: "true"
+      USE_MARKOV: "true"
+      USE_IR: "true"
+      USE_PERSONA_LOGIC: "true"
+
+      # 4GB VRAM optimization
+      MAX_BATCH_SIZE: 1
+      GENERATION_TIMEOUT: 30
+      MODEL_LOAD_TIMEOUT: 180
+      DEFAULT_MAX_TOKENS: 256
+      MAX_MEMORY_GB: 4
+
+      # CUDA optimization for small VRAM
+      CUDA_VISIBLE_DEVICES: 0
+      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:128,garbage_collection_threshold:0.6"
+
+    volumes:
+      - ./ai-service/logs:/app/logs
+      - ./data:/app/data:ro
+      - ai_models_4gb:/app/models
+      - ai_hf_cache:/app/hf_cache  # Pre-downloaded HuggingFace models
+    networks:
+      - elioverse-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 6G
+        reservations:
+          cpus: "1"
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
 networks:
   elioverse-network:
     driver: bridge
 
 volumes:
   mongo_data:
+    driver: local
+  ai_models_4gb:
+    driver: local
+  ai_hf_cache:
     driver: local

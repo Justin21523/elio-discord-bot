@@ -102,6 +102,9 @@ import * as personaModule from "./persona.js";
 import * as personaLogicModule from "./personaLogic.js";
 import * as hybridModule from "./hybrid.js";
 import * as gameAIModule from "./gameAI.js";
+import * as irModule from "./ir.js";
+import * as markovModule from "./markov.js";
+import * as recsModule from "./recs.js";
 import { healthCheck as healthCheckFn } from "./client.js";
 
 export default {
@@ -119,5 +122,8 @@ export default {
   personaLogic: personaLogicModule,
   hybrid: hybridModule,
   gameAI: gameAIModule,
+  ir: irModule,
+  markov: markovModule,
+  recs: recsModule,
   healthCheck: healthCheckFn,
 };

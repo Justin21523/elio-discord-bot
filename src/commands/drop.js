@@ -45,7 +45,7 @@ export const data = new SlashCommandBuilder()
  * @returns {Promise<{ok: boolean, data?: any, error?: any}>}
  */
 export async function execute(interaction) {
-  await interaction.deferReply();
+  await interaction.deferReply({ ephemeral: true });
   const subcommand = interaction.options.getSubcommand();
 
   switch (subcommand) {

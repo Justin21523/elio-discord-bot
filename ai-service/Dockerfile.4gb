@@ -1,0 +1,74 @@
+# Dockerfile.4gb - Optimized for 4GB VRAM GPUs (GTX 1050 Ti, GTX 1650, etc.)
+# Uses CUDA 11.8 for Pascal architecture compatibility (CUDA Compute 6.1)
+
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    python3.11-dev \
+    build-essential \
+    cmake \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements first (for caching)
+COPY requirements-4gb.txt .
+
+# Install PyTorch with CUDA 11.8 support
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cu118 \
+    torch==2.2.0
+
+# Install other Python dependencies
+RUN pip install --no-cache-dir -r requirements-4gb.txt
+
+# Install llama-cpp-python with CUDA support for GGUF models
+# This compiles from source to enable GPU acceleration
+ENV CMAKE_ARGS="-DLLAMA_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=61"
+RUN pip install --no-cache-dir llama-cpp-python==0.2.90
+
+# Copy application code
+COPY . .
+
+# Create model cache directory
+RUN mkdir -p /app/models /app/hf_cache
+
+# Set HuggingFace cache directory (for pre-downloaded models)
+ENV HF_HOME=/app/hf_cache
+ENV TRANSFORMERS_CACHE=/app/hf_cache
+ENV SENTENCE_TRANSFORMERS_HOME=/app/hf_cache
+
+# Set CUDA environment variables for 4GB optimization
+ENV PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:128,garbage_collection_threshold:0.6"
+ENV CUDA_VISIBLE_DEVICES=0
+ENV USE_4BIT=true
+ENV LLM_MODEL=phi3-mini
+ENV MAX_BATCH_SIZE=1
+ENV CPU_ONLY=false
+ENV USE_GPU=true
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "app.app:app", "--host", "0.0.0.0", "--port", "8000"]

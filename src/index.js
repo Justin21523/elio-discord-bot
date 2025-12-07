@@ -39,16 +39,21 @@ import * as aiCmd from "./commands/ai.js";
 import * as ragCmd from "./commands/rag.js";
 import * as finetuneCmd from "./commands/finetune.js";
 import * as configProactiveCmd from "./commands/config-proactive.js";
+import { loadProactiveSchedules } from "./commands/config-proactive.js";
 import * as minigameCmd from "./commands/minigame.js";
 import * as adminDataCmd from "./commands/admin-data.js";
 import * as lootCmd from "./commands/loot.js";
 import * as inventoryCmd from "./commands/inventory.js";
 import * as historyCmd from "./commands/history.js";
 import * as privacyCmd from "./commands/privacy.js";
+import * as helpCmd from "./commands/help.js";
 
 // Import event handlers
 import * as messageCreateEvent from "./events/messageCreate.js";
 import * as dmCreateEvent from "./events/dmCreate.js";
+
+// Pre-import minigame handler (avoid dynamic import latency on button clicks)
+import { handleMinigameButton } from "./handlers/minigameHandlers.js";
 
 // Import job modules
 import * as autoScenarios from "./jobs/autoScenarios.js";
@@ -135,6 +140,7 @@ function buildRouter() {
     inventoryCmd,
     historyCmd,
     privacyCmd,
+    helpCmd,
   ];
 
   for (const cmd of commands) {
@@ -150,12 +156,15 @@ function buildRouter() {
 const router = buildRouter();
 
 // 6) Ready event
-client.once(Events.ClientReady, () => {
+client.once(Events.ClientReady, async () => {
   logger.info(`[BOT] Logged in as ${client.user.tag}`);
   logger.info(`[BOT] Ready! Serving ${client.guilds.cache.size} guilds`);
 
   // Register cron jobs (optional - configure via env)
   registerCronJobs();
+
+  // Load proactive schedules from database
+  await loadProactiveSchedules(client);
 });
 
 /**
@@ -408,16 +417,26 @@ function getButtonHandler(customId) {
     };
   }
 
-  // Mini-game system button handlers
-  if (
-    customId.startsWith("trivia_") ||
-    customId.startsWith("adventure_") ||
-    customId.startsWith("reaction_")
-  ) {
-    return async (interaction) => {
-      const { handleMinigameButton } = await import("./handlers/minigameHandlers.js");
-      return handleMinigameButton(interaction);
-    };
+  // Mini-game system button handlers (all 12 game types)
+  // Pre-imported at top of file for faster response time
+  const MINIGAME_PREFIXES = [
+    "trivia_",        // Trivia game
+    "adventure_",     // Adventure game
+    "reaction_",      // Reaction game
+    "dice-roll_",     // Dice roll game
+    "battle_",        // Battle game
+    "guess_",         // Guess number game
+    "ir-clue_",       // IR clue game
+    "doc-hunt_",      // Doc hunt game
+    "hmm_",           // HMM sequence game
+    "ngram-story_",   // N-gram story game
+    "pmi_",           // PMI association game
+    "keyword-pmi_",   // Keyword PMI game
+    "minigame_",      // Recommended start buttons (minigame_start_*)
+  ];
+
+  if (MINIGAME_PREFIXES.some((prefix) => customId.startsWith(prefix))) {
+    return handleMinigameButton; // Direct reference, no dynamic import
   }
 
   // Feedback buttons for continuous learning

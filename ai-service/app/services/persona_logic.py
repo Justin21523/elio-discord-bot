@@ -159,6 +159,7 @@ class PersonaLogicEngine:
             self.root / "data" / "training" / "fandom-lore-training-data.jsonl",  # Lore-specific data
             self.root / "data" / "training" / "multi-character-v2.jsonl",  # Multi-character generated data (2,380+)
             self.root / "data" / "training" / "supplemental-elio-bryce-caleb.jsonl",  # Elio/Bryce/Caleb supplemental
+            self.root / "data" / "training" / "main-characters-9k.jsonl",  # Main characters (Elio/Bryce/Caleb) 9k+ samples
         ]
 
         # Also load user interaction exports (daily exports from Discord)

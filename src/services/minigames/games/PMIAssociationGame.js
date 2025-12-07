@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logger } from "../../../util/logger.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const assocData = require("../../../../data/minigames/clues.json");
@@ -21,6 +22,16 @@ export class PMIAssociationGame extends BaseGame {
   }
 
   buildCorpus() {
+    // Try to get corpus from training data first
+    const pmiCorpus = TrainingDataLoader.getPMICorpus();
+
+    if (pmiCorpus && pmiCorpus.tokens && pmiCorpus.tokens.length > 100) {
+      logger.info(`[PMIAssociationGame] Using training corpus with ${pmiCorpus.tokens.length} tokens`);
+      return pmiCorpus.tokens;
+    }
+
+    // Fallback to static data
+    logger.info("[PMIAssociationGame] Using static corpus");
     return assocData.documents
       .map((d) =>
         (d.passage || d.text || "")
@@ -34,6 +45,7 @@ export class PMIAssociationGame extends BaseGame {
 
   async start() {
     this.status = "active";
+    this.startedAt = Date.now();
     await this.channel.send({
       embeds: [
         {

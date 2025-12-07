@@ -9,6 +9,7 @@ import { getCollection } from "../db/mongo.js";
 import { listPersonas, getPersona } from "../services/persona.js";
 import { incCounter } from "../util/metrics.js";
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { detectPersona } from "../services/personaSwitcher.js";
 
 // DM Session storage (in-memory for now)
 const dmSessions = new Map();
@@ -107,38 +108,44 @@ async function handleDMCommand(message, session, services) {
 }
 
 /**
- * Show DM help menu
+ * Show DM help menu - comprehensive command guide
+ * Exported for use in channel !help command
  */
-async function showDMHelp(message) {
-  const embed = new EmbedBuilder()
+export async function showDMHelp(message) {
+  // Send multiple embeds for comprehensive help
+
+  // Embed 1: DM Commands
+  const dmEmbed = new EmbedBuilder()
     .setColor(0x0099ff)
-    .setTitle("🤖 Elio Bot - DM Commands")
+    .setTitle("🤖 Elio Bot - Complete Command Guide")
     .setDescription(
-      "Welcome to your personal AI assistant! Here's what you can do:"
+      "Welcome! This is your complete guide to using Elio Bot.\n" +
+      "You can use commands in DMs or servers."
     )
     .addFields(
       {
+        name: "━━━━━━━━ DM Commands ━━━━━━━━",
+        value: "These commands work in Direct Messages:",
+        inline: false,
+      },
+      {
         name: "💬 Chat",
-        value:
-          "Just send any message to chat with AI! I'll remember our conversation.",
+        value: "Just send any message to chat with AI! I'll remember our conversation.",
         inline: false,
       },
       {
         name: "🎭 !persona <name>",
-        value:
-          "Chat with a specific persona (Elio, Glordon, Caleb, Olga)\nExample: `!persona Elio`",
+        value: "Chat with a specific character\n`!persona Elio` · `!persona Glordon` · `!persona Caleb`",
         inline: false,
       },
       {
         name: "🎮 !game <type>",
-        value:
-          "Start a mini game!\nTypes: `trivia`, `riddle`, `story`\nExample: `!game trivia`",
+        value: "Start a mini game in DM\n`!game trivia` · `!game riddle` · `!game story`",
         inline: false,
       },
       {
         name: "📖 !story <theme>",
-        value:
-          "Generate an interactive story\nExample: `!story space adventure`",
+        value: "Generate an interactive story\n`!story space adventure` · `!story mystery`",
         inline: false,
       },
       {
@@ -148,16 +155,195 @@ async function showDMHelp(message) {
       },
       {
         name: "📊 !status",
-        value: "Show current session status",
+        value: "Show session status",
+        inline: true,
+      }
+    );
+
+  // Embed 2: Server Slash Commands - Games
+  const gamesEmbed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle("🎮 Server Commands - Games & Fun")
+    .setDescription("Use these slash commands in any server with the bot:")
+    .addFields(
+      {
+        name: "/minigame start <type>",
+        value:
+          "Start a mini-game! Types:\n" +
+          "• `trivia` - Test your knowledge\n" +
+          "• `adventure` - Choose your path\n" +
+          "• `reaction` - Test reflexes\n" +
+          "• `battle` - Turn-based duel\n" +
+          "• `dice-roll` - Dice duel\n" +
+          "• `guess-number` - Logic game\n" +
+          "Options: `vs_bot`, `rounds`, `topic`, `mode`",
+        inline: false,
+      },
+      {
+        name: "/minigame recommend",
+        value: "Get personalized game recommendations",
+        inline: true,
+      },
+      {
+        name: "/minigame stats",
+        value: "View your game statistics",
+        inline: true,
+      },
+      {
+        name: "/minigame stop",
+        value: "Stop current game",
+        inline: true,
+      },
+      {
+        name: "/game start",
+        value: "Quick reaction game",
+        inline: true,
+      },
+      {
+        name: "/loot pull",
+        value: "Draw random items",
+        inline: true,
+      },
+      {
+        name: "/inventory list",
+        value: "View your items",
+        inline: true,
+      }
+    );
+
+  // Embed 3: AI & Chat Commands
+  const aiEmbed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle("🤖 Server Commands - AI & Chat")
+    .addFields(
+      {
+        name: "/ai ask <question>",
+        value: "Ask AI a question using RAG (lore-grounded answers)",
+        inline: false,
+      },
+      {
+        name: "/ai check",
+        value: "Check AI service health",
+        inline: true,
+      },
+      {
+        name: "/greet now",
+        value: "Get a greeting from a character",
+        inline: true,
+      },
+      {
+        name: "/persona list",
+        value: "View all available personas",
+        inline: false,
+      },
+      {
+        name: "/persona meet <name>",
+        value: "Have a persona appear in channel",
+        inline: true,
+      },
+      {
+        name: "/persona ask <name> <question>",
+        value: "Ask a persona a question",
+        inline: true,
+      },
+      {
+        name: "/story generate <prompt>",
+        value: "Generate an AI story",
+        inline: false,
+      },
+      {
+        name: "/rag query <question>",
+        value: "Search the knowledge base",
+        inline: true,
+      }
+    );
+
+  // Embed 4: Economy & Profile
+  const economyEmbed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle("💰 Server Commands - Economy & Profile")
+    .addFields(
+      {
+        name: "/points balance",
+        value: "Check your points",
+        inline: true,
+      },
+      {
+        name: "/points award <user> <amount>",
+        value: "Give points (admin)",
+        inline: true,
+      },
+      {
+        name: "/profile [user]",
+        value: "View profile and stats",
+        inline: true,
+      },
+      {
+        name: "/leaderboard [limit]",
+        value: "View server rankings",
+        inline: true,
+      },
+      {
+        name: "/drop set <time> <channel>",
+        value: "Schedule daily drops",
+        inline: true,
+      },
+      {
+        name: "/drop now",
+        value: "Drop media now",
+        inline: true,
+      }
+    );
+
+  // Embed 5: Admin Commands
+  const adminEmbed = new EmbedBuilder()
+    .setColor(0xe74c3c)
+    .setTitle("⚙️ Server Commands - Admin & Config")
+    .setDescription("These require appropriate permissions:")
+    .addFields(
+      {
+        name: "/config-proactive get/set",
+        value: "Configure proactive AI features (meme drops, auto-chat, etc.)",
+        inline: false,
+      },
+      {
+        name: "/scenario start",
+        value: "Start interactive scenario quiz",
+        inline: true,
+      },
+      {
+        name: "/schedule list/cancel",
+        value: "Manage scheduled jobs",
+        inline: true,
+      },
+      {
+        name: "/admin-data update/status",
+        value: "Manage dynamic data",
+        inline: true,
+      },
+      {
+        name: "/history sync/search",
+        value: "Manage channel history",
+        inline: true,
+      },
+      {
+        name: "/privacy settings",
+        value: "Manage your data privacy",
         inline: true,
       }
     )
     .setFooter({
-      text: "Powered by AI - RAG, LLM, VLM, and more!",
+      text: "💡 Use /help in servers for quick access | Powered by AI",
     })
     .setTimestamp();
 
-  await message.channel.send({ embeds: [embed] });
+  // Send all embeds
+  await message.channel.send({ embeds: [dmEmbed] });
+  await message.channel.send({ embeds: [gamesEmbed] });
+  await message.channel.send({ embeds: [aiEmbed] });
+  await message.channel.send({ embeds: [economyEmbed] });
+  await message.channel.send({ embeds: [adminEmbed] });
+
   incCounter("dm_help_views");
 }
 
@@ -213,19 +399,10 @@ async function handlePersonaCommand(message, session, services, args) {
 
 /**
  * Handle DM chat (AI-powered conversation)
+ * Supports persona detection via keywords and displays persona avatar using embeds
  */
 async function handleDMChat(message, session, services) {
   const { ai } = services;
-
-  // Debug: log ai object structure
-  logger.info("[DM] ai object check", {
-    hasAi: !!ai,
-    aiKeys: ai ? Object.keys(ai) : [],
-    hasPersonaLogic: !!ai?.personaLogic,
-    personaLogicKeys: ai?.personaLogic ? Object.keys(ai.personaLogic) : [],
-    hasReply: !!ai?.personaLogic?.reply,
-    replyType: typeof ai?.personaLogic?.reply,
-  });
 
   if (!ai) {
     return await message.channel.send(
@@ -234,6 +411,54 @@ async function handleDMChat(message, session, services) {
   }
 
   try {
+    // STEP 1: Detect persona from keywords (like channel behavior)
+    let activePersona = null;
+    let usePersonaAvatar = false; // Only show avatar when persona is explicitly detected
+
+    // Try keyword-based persona detection
+    const detection = await detectPersona(
+      message.content,
+      null,
+      services,
+      null // No guild ID in DMs
+    );
+
+    if (detection.persona && detection.confidence > 0.5) {
+      // Found a persona via keywords - load full persona data
+      const personaResult = await getPersona(detection.persona);
+      if (personaResult.ok) {
+        activePersona = personaResult.data;
+        usePersonaAvatar = true; // Show avatar for keyword-triggered persona
+
+        // Only update session persona if it's a high confidence match
+        if (detection.confidence > 0.7) {
+          session.persona = activePersona;
+        }
+
+        logger.info("[DM] Persona detected from keywords", {
+          userId: session.userId,
+          persona: activePersona.name,
+          confidence: detection.confidence,
+          reason: detection.reason,
+        });
+      }
+    }
+
+    // If no keyword match but we have an active session persona, use it (but without avatar)
+    if (!activePersona && session.persona) {
+      activePersona = session.persona;
+      usePersonaAvatar = false; // No avatar for continuation messages
+    }
+
+    // Default to Elio if no persona detected (no avatar for default)
+    if (!activePersona) {
+      const defaultPersonaResult = await getPersona("Elio");
+      if (defaultPersonaResult.ok) {
+        activePersona = defaultPersonaResult.data;
+        usePersonaAvatar = false; // No avatar for default
+      }
+    }
+
     // Add to conversation history
     session.conversationHistory.push({
       role: "user",
@@ -246,23 +471,8 @@ async function handleDMChat(message, session, services) {
       session.conversationHistory = session.conversationHistory.slice(-10);
     }
 
-    // Build context from history
-    const conversationContext = session.conversationHistory
-      .slice(-5)
-      .map((msg) => `${msg.role}: ${msg.content}`)
-      .join("\n");
-
     // Generate AI response using CPU-only personaLogic service
     let response;
-
-    // Get or default to Elio persona for DM
-    let activePersona = session.persona;
-    if (!activePersona) {
-      const defaultPersonaResult = await getPersona("Elio");
-      if (defaultPersonaResult.ok) {
-        activePersona = defaultPersonaResult.data;
-      }
-    }
 
     // Build history for personaLogic
     const historyPayload = session.conversationHistory.slice(-5).map((h) => ({
@@ -283,12 +493,15 @@ async function handleDMChat(message, session, services) {
           message: message.content,
           history: historyPayload,
           topK: 5,
-          maxLen: 90,
+          maxLen: 120, // API limit is 120
         });
 
-        logger.info("[DM] personaLogic.reply result", {
+        // Debug: Log the full response structure
+        logger.debug("[DM] personaLogic.reply result", {
           ok: logicRes?.ok,
+          hasData: !!logicRes?.data,
           hasText: !!logicRes?.data?.text,
+          textLength: logicRes?.data?.text?.length,
           strategy: logicRes?.data?.strategy,
         });
 
@@ -297,6 +510,13 @@ async function handleDMChat(message, session, services) {
           logger.info("[DM] Using personaLogic response", {
             strategy: logicRes.data.strategy,
             responseLength: response.length,
+            mood: logicRes.data.mood,
+          });
+        } else {
+          logger.warn("[DM] personaLogic returned invalid response", {
+            ok: logicRes?.ok,
+            errorCode: logicRes?.error?.code,
+            errorMsg: logicRes?.error?.message,
           });
         }
       } catch (error) {
@@ -306,14 +526,12 @@ async function handleDMChat(message, session, services) {
         });
       }
     } else {
-      logger.warn("[DM] personaLogic.reply not available", {
+      logger.warn("[DM] personaLogic service not available", {
+        hasAi: !!ai,
         hasPersonaLogic: !!ai?.personaLogic,
         hasReply: !!ai?.personaLogic?.reply,
       });
     }
-
-    // Skip persona.compose fallback in CPU-only mode (it requires LLM)
-    // Go directly to template fallback
 
     // Final fallback: simple template response
     if (!response) {
@@ -336,16 +554,26 @@ async function handleDMChat(message, session, services) {
       timestamp: Date.now(),
     });
 
-    await message.channel.send(response);
+    // STEP 2: Send response - only use persona embed when explicitly triggered
+    if (usePersonaAvatar && activePersona) {
+      // Persona was explicitly detected - show avatar
+      await sendAsPersonaInDM(message.channel, activePersona, response);
+    } else {
+      // No persona keyword detected - send plain text (like channel behavior)
+      await message.channel.send(response);
+    }
 
     incCounter("dm_chat_messages", {
-      has_persona: session.persona ? "yes" : "no",
+      has_persona: activePersona ? "yes" : "no",
+      persona: activePersona?.name || "none",
+      used_avatar: usePersonaAvatar ? "yes" : "no",
     });
 
     logger.info("[DM] Chat response sent", {
       userId: session.userId,
-      persona: session.persona?.name || "none",
+      persona: activePersona?.name || "none",
       responseLength: response.length,
+      usedAvatar: usePersonaAvatar,
     });
   } catch (error) {
     logger.error("[DM] Chat generation failed", {
@@ -357,6 +585,52 @@ async function handleDMChat(message, session, services) {
       "❌ Sorry, I couldn't generate a response. Please try again!"
     );
   }
+}
+
+/**
+ * Send a message as a persona in DM (using embed with avatar since webhooks don't work in DMs)
+ * @param {DMChannel} channel - DM channel
+ * @param {Object} persona - Persona object with name, avatar, color
+ * @param {string} content - Message content
+ */
+async function sendAsPersonaInDM(channel, persona, content) {
+  if (!persona) {
+    // No persona - send as regular bot message
+    await channel.send(content);
+    return;
+  }
+
+  // Get avatar URL - support both `avatar` and `avatarUrl` fields
+  const avatarUrl = persona.avatar || persona.avatarUrl || persona.image;
+
+  // Debug log for avatar
+  logger.debug("[DM] Sending as persona", {
+    personaName: persona.name,
+    avatarUrl: avatarUrl || "none",
+    personaFields: Object.keys(persona),
+  });
+
+  // Get persona color or default (handle hex string or number)
+  let color = persona.color || 0x5865f2;
+  if (typeof color === "string") {
+    color = parseInt(color.replace("#", ""), 16);
+  }
+
+  // Build embed that simulates persona appearance
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setAuthor({
+      name: persona.name,
+      iconURL: avatarUrl || undefined,
+    })
+    .setDescription(content);
+
+  // Add persona thumbnail for more visual presence
+  if (avatarUrl) {
+    embed.setThumbnail(avatarUrl);
+  }
+
+  await channel.send({ embeds: [embed] });
 }
 
 /**

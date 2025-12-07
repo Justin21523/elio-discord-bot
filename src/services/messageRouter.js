@@ -13,6 +13,7 @@ import * as conversationHistory from "./conversationHistory.js";
 import * as personaSwitcher from "./personaSwitcher.js";
 import { AI_ENABLED } from "../config.js";
 import { interactionLogger } from "./interactionLogger.js";
+import { showDMHelp } from "../handlers/dmHandlers.js";
 
 // Cooldown tracking (in-memory) - PER USER, not per channel!
 const cooldowns = new Map();
@@ -148,8 +149,19 @@ export async function handlePublicMessage(message, services) {
     // Skip bot messages
     if (message.author.bot) return;
 
-    // Skip commands
+    // Skip slash commands
     if (message.content.startsWith("/")) return;
+
+    // Handle !help command in channels (same as DM help)
+    if (message.content.toLowerCase().trim() === "!help") {
+      logger.info("[AUTO-REPLY] !help command in channel", {
+        guildId: message.guildId,
+        channelId: message.channelId,
+        userId: message.author.id,
+      });
+      incCounter("channel_help_command");
+      return await showDMHelp(message);
+    }
 
     // Get guild config
     const configCol = getCollection("guild_config");
@@ -259,11 +271,16 @@ export async function handlePublicMessage(message, services) {
 }
 
 /**
- * Detect if user explicitly mentioned a persona (e.g., "Hey Elio", "Glordon tell me...")
+ * Detect if user mentioned a persona name anywhere in the message
+ * Works with @bot mentions - checks for persona name in the full message
  * Returns persona name if found, null otherwise
  */
 async function detectExplicitPersonaMention(messageContent) {
-  const content = messageContent.toLowerCase();
+  // Remove the @bot mention part to focus on the actual content
+  const content = messageContent
+    .replace(/<@!?\d+>/g, '') // Remove @mentions
+    .toLowerCase()
+    .trim();
 
   // Get all available personas
   const personasResult = await listPersonas();
@@ -271,43 +288,20 @@ async function detectExplicitPersonaMention(messageContent) {
     return null;
   }
 
-  // Check for direct persona name mentions at start of message or after punctuation
-  // Patterns: "Hey {Persona}", "{Persona},", "{Persona}!", etc.
+  // Check for persona name anywhere in the message
   for (const persona of personasResult.data) {
     const personaName = persona.name.toLowerCase();
 
-    // Pattern 1: Name at start of message
-    const startPatterns = [
-      new RegExp(`^${personaName}[,!?:\\s]`, 'i'),
-      new RegExp(`^hey ${personaName}`, 'i'),
-      new RegExp(`^hi ${personaName}`, 'i'),
-      new RegExp(`^hello ${personaName}`, 'i'),
-      new RegExp(`^yo ${personaName}`, 'i'),
-    ];
+    // Pattern 1: Persona name as a standalone word anywhere in the message
+    // Uses word boundaries to avoid partial matches (e.g., "Elio" shouldn't match "helio")
+    const namePattern = new RegExp(`\\b${personaName}\\b`, 'i');
 
-    for (const pattern of startPatterns) {
-      if (pattern.test(content)) {
-        logger.debug("[AUTO-REPLY] Explicit mention detected (start pattern)", {
-          persona: persona.name,
-          pattern: pattern.source
-        });
-        return persona.name;
-      }
-    }
-
-    // Pattern 2: "{Persona} tell me", "{Persona} what", etc.
-    const commandPatterns = [
-      new RegExp(`${personaName}\\s+(tell|what|how|why|where|when|can|could|would|should)`, 'i'),
-    ];
-
-    for (const pattern of commandPatterns) {
-      if (pattern.test(content)) {
-        logger.debug("[AUTO-REPLY] Explicit mention detected (command pattern)", {
-          persona: persona.name,
-          pattern: pattern.source
-        });
-        return persona.name;
-      }
+    if (namePattern.test(content)) {
+      logger.debug("[AUTO-REPLY] Persona name detected in message", {
+        persona: persona.name,
+        content: content.substring(0, 50)
+      });
+      return persona.name;
     }
   }
 
@@ -316,6 +310,13 @@ async function detectExplicitPersonaMention(messageContent) {
 
 /**
  * Check if message should trigger auto-reply
+ *
+ * NEW RULES:
+ * 1. MUST @tag the bot to trigger any response
+ * 2. @tag bot + persona name = respond with that persona's avatar webhook
+ * 3. @tag bot without persona name = respond as default assistant (Elio Bot)
+ * 4. Just persona name without @tag = NO response
+ * 5. Reply to bot/persona message = continue conversation
  */
 async function shouldAutoReply(message, config, services) {
   const content = message.content.toLowerCase();
@@ -325,30 +326,7 @@ async function shouldAutoReply(message, config, services) {
   // Get currently active persona for this user (if any)
   const currentPersona = personaSwitcher.getActivePersona(userId, channelId);
 
-  // PRIORITY 1: Check for @bot mention (original assistant mode)
-  // When user @mentions the bot itself, respond in original assistant form
-  if (message.mentions.has(message.client.user)) {
-    const cooldownKey = `mention:${userId}`;
-    if (isOnCooldown(cooldownKey, MENTION_COOLDOWN_MS)) {
-      return { shouldReply: false };
-    }
-    setCooldown(cooldownKey);
-
-    logger.info("[AUTO-REPLY] @bot mention detected - using original assistant mode", {
-      userId,
-      message: message.content.substring(0, 50)
-    });
-
-    return {
-      shouldReply: true,
-      persona: null, // null = original assistant mode
-      reason: "bot_mention",
-      originalMode: true
-    };
-  }
-
-  // PRIORITY 1.5: Check if replying to bot's message
-  // When user replies to any bot message, continue the conversation
+  // PRIORITY 0: Check if replying to bot's message (allows continuation without @tag)
   if (message.reference) {
     try {
       const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
@@ -404,18 +382,30 @@ async function shouldAutoReply(message, config, services) {
     }
   }
 
-  // PRIORITY 2: Check for EXPLICIT persona tag/mention
-  // If user explicitly mentions a persona name, THAT persona MUST respond
+  // PRIORITY 1: MUST have @bot mention to trigger any response
+  // This is the ONLY way to start a new conversation (other than replying)
+  if (!message.mentions.has(message.client.user)) {
+    // No @tag = no response, even if persona name is mentioned
+    logger.debug("[AUTO-REPLY] No @bot mention - ignoring message", {
+      userId,
+      content: message.content.substring(0, 50)
+    });
+    return { shouldReply: false };
+  }
+
+  // From here on, we know the bot was @mentioned
+
+  const cooldownKey = `mention:${userId}`;
+  if (isOnCooldown(cooldownKey, MENTION_COOLDOWN_MS)) {
+    return { shouldReply: false };
+  }
+  setCooldown(cooldownKey);
+
+  // PRIORITY 2: Check for persona name in the message (after @tag)
+  // @bot + persona name = respond with that persona's webhook avatar
   const explicitPersona = await detectExplicitPersonaMention(message.content);
   if (explicitPersona) {
-    const cooldownKey = `explicit:${userId}:${explicitPersona}`;
-    if (isOnCooldown(cooldownKey, MENTION_COOLDOWN_MS)) {
-      logger.debug("[AUTO-REPLY] Explicit mention on cooldown", { persona: explicitPersona, userId });
-      return { shouldReply: false };
-    }
-    setCooldown(cooldownKey);
-
-    logger.info("[AUTO-REPLY] Explicit persona mention detected", {
+    logger.info("[AUTO-REPLY] @bot + persona name detected - using persona webhook", {
       userId,
       persona: explicitPersona,
       message: message.content.substring(0, 50)
@@ -424,127 +414,24 @@ async function shouldAutoReply(message, config, services) {
     return {
       shouldReply: true,
       persona: explicitPersona,
-      reason: "explicit_mention",
+      reason: "bot_mention_with_persona",
       confidence: 1.0,
       switched: explicitPersona !== currentPersona
     };
   }
 
-  // PRIORITY 3: INTELLIGENT PERSONA DETECTION
-  // Use AI Agent + RAG + Keywords to detect which persona to use
-  const detection = await personaSwitcher.detectPersona(
-    message.content,
-    currentPersona,
-    services,
-    message.guildId
-  );
-
-  logger.info("[AUTO-REPLY] Persona detection result", {
+  // PRIORITY 3: @bot without persona name = original assistant mode (Elio Bot)
+  logger.info("[AUTO-REPLY] @bot mention only - using original assistant mode", {
     userId,
-    currentPersona,
-    detected: detection.persona,
-    confidence: detection.confidence,
-    reason: detection.reason,
-    shouldSwitch: detection.shouldSwitch,
     message: message.content.substring(0, 50)
   });
 
-  // Check if we should reply based on detection confidence
-  // STRATEGY: First reply needs clear intent, multi-turn conversations can be lenient
-  // - explicit triggers (@, keywords, explicit mention): handled above, always reply
-  // - conversation continuation: 0.5 (LOW - allow context-based continuation)
-  // - keyword match: 0.75 (MEDIUM-HIGH - name mention or multiple keywords)
-  // - RAG detection: 0.90 (HIGH - semantically very relevant content)
-  // - AI Agent: 0.90 (HIGH - AI's chain-of-thought confident match)
-
-  let confidenceThreshold;
-  if (detection.reason === "conversation_continuation") {
-    // LOW threshold for multi-turn conversations - context is enough
-    confidenceThreshold = 0.5;
-  } else if (detection.reason === "keyword_match") {
-    // MEDIUM-HIGH threshold for keyword-based first reply
-    // With improved keyword detection, 0.75 means: name mention OR 2-3 strong keywords
-    confidenceThreshold = 0.75;
-  } else if (detection.reason === "rag_semantic") {
-    // HIGH threshold for RAG first reply - semantically relevant
-    confidenceThreshold = 0.90;
-  } else if (detection.reason === "ai_agent") {
-    // HIGH threshold for AI Agent first reply - confident reasoning
-    confidenceThreshold = 0.90;
-  } else {
-    // Default high threshold for other cases
-    confidenceThreshold = 0.90;
-  }
-
-  if (detection.persona && detection.confidence >= confidenceThreshold) {
-    // Determine appropriate cooldown based on trigger type
-    let cooldownKey;
-    let cooldownTime;
-
-    if (detection.reason === "keyword_match") {
-      cooldownKey = `keyword:${userId}:${detection.persona}`;
-      cooldownTime = KEYWORD_COOLDOWN_MS;
-    } else if (detection.reason === "conversation_continuation") {
-      cooldownKey = `conversation:${userId}:${detection.persona}`;
-      cooldownTime = CONVERSATION_COOLDOWN_MS;
-    } else if (detection.reason === "rag_semantic" || detection.reason === "ai_agent") {
-      cooldownKey = `smart:${userId}:${detection.persona}`;
-      cooldownTime = KEYWORD_COOLDOWN_MS;
-    } else {
-      cooldownKey = `auto:${userId}:${detection.persona}`;
-      cooldownTime = KEYWORD_COOLDOWN_MS;
-    }
-
-    // Check cooldown
-    if (isOnCooldown(cooldownKey, cooldownTime)) {
-      logger.debug("[AUTO-REPLY] On cooldown", { cooldownKey, userId });
-      return { shouldReply: false };
-    }
-
-    setCooldown(cooldownKey);
-
-    return {
-      shouldReply: true,
-      persona: detection.persona,
-      reason: detection.reason,
-      confidence: detection.confidence,
-      switched: detection.shouldSwitch
-    };
-  }
-
-  // FALLBACK 2: Check for images (VLM) - DISABLED to reduce spam
-  // Only respond to images if explicitly mentioned or replied to
-  // if (config.useVLM && message.attachments.size > 0) {
-  //   const hasImage = Array.from(message.attachments.values()).some((a) =>
-  //     a.contentType?.startsWith("image/")
-  //   );
-  //   if (hasImage) {
-  //     const cooldownKey = `vlm:${userId}`;
-  //     if (isOnCooldown(cooldownKey, KEYWORD_COOLDOWN_MS)) {
-  //       return { shouldReply: false };
-  //     }
-  //     setCooldown(cooldownKey);
-  //     return { shouldReply: true, reason: "image", hasImage: true };
-  //   }
-  // }
-
-  // FALLBACK 3: Random chance reply - DISABLED to reduce spam
-  // if (config.autoPersonaChat && Math.random() < 0.01) {
-  //   const cooldownKey = `random:${userId}`;
-  //   if (isOnCooldown(cooldownKey, RANDOM_COOLDOWN_MS)) {
-  //     return { shouldReply: false };
-  //   }
-  //   setCooldown(cooldownKey);
-  //
-  //   const randomPersona = await pickRandomPersona();
-  //   return {
-  //     shouldReply: true,
-  //     persona: randomPersona,
-  //     reason: "random"
-  //   };
-  // }
-
-  return { shouldReply: false };
+  return {
+    shouldReply: true,
+    persona: null, // null = original assistant mode
+    reason: "bot_mention",
+    originalMode: true
+  };
 }
 
 /**

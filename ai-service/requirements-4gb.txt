@@ -1,0 +1,44 @@
+# requirements-4gb.txt
+# Optimized dependencies for 4GB VRAM GPUs (GTX 1050 Ti, GTX 1650)
+# Uses CUDA 11.8 for Pascal architecture compatibility
+
+# ===== Core Framework =====
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# ===== ML/AI Core =====
+# PyTorch is installed separately in Dockerfile with CUDA 11.8
+# torch==2.2.0 (from https://download.pytorch.org/whl/cu118)
+transformers>=4.40.0
+accelerate>=0.28.0
+
+# Quantization support
+bitsandbytes>=0.43.0
+
+# Sentence embeddings (for PersonaLogic)
+sentence-transformers>=2.5.0
+
+# ===== Traditional ML (CPU-friendly) =====
+scikit-learn>=1.4.0
+numpy<2.0
+
+# ===== Data Processing =====
+pandas>=2.0.0
+
+# ===== Async/HTTP =====
+httpx>=0.26.0
+aiofiles>=23.2.1
+
+# ===== Logging/Monitoring =====
+structlog>=24.1.0
+prometheus-client>=0.19.0
+
+# ===== Optional: GGUF support =====
+# llama-cpp-python is installed separately with CUDA flags
+# CMAKE_ARGS="-DLLAMA_CUDA=on" pip install llama-cpp-python>=0.2.0
+
+# ===== Utilities =====
+python-dotenv>=1.0.0
+tenacity>=8.2.0

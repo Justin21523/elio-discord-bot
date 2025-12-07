@@ -1,6 +1,7 @@
 /**
  * services/minigames/games/AdventureGame.js
  * Branching story with voting, items, rewards/penalties (CPU-only)
+ * Enhanced with training data for dynamic story generation.
  */
 
 import { createRequire } from "module";
@@ -9,6 +10,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { logger } from "../../../util/logger.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logEvent } from "../../analytics/events.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const adventureData = require("../../../../data/minigames/adventure.json");
@@ -20,12 +22,96 @@ export class AdventureGame extends BaseGame {
   async initialize() {
     await super.initialize();
 
+    // Build story nodes from training data + static data
+    this.story = this.buildStory();
+
     this.gameData = {
       nodeId: "start",
       inventory: new Set(this.options.keyItems || []),
       votes: new Map(), // userId -> choiceIdx
       lastVoteAt: new Map(),
     };
+  }
+
+  buildStory() {
+    // Start with static story
+    const story = { ...adventureData.story };
+
+    // Try to enhance with training data
+    const trainingPassages = TrainingDataLoader.getRandomPassages(20);
+
+    if (trainingPassages && trainingPassages.length > 5) {
+      logger.info(`[AdventureGame] Enhancing with ${trainingPassages.length} training passages`);
+
+      // Create dynamic story nodes from training data
+      const dynamicNodes = trainingPassages.slice(0, 8).map((passage, idx) => ({
+        id: `scene_${idx}`,
+        text: passage.text.substring(0, 300) + (passage.text.length > 300 ? "..." : ""),
+        character: passage.character,
+      }));
+
+      // Add dynamic nodes with choices
+      dynamicNodes.forEach((node, idx) => {
+        const choices = [];
+
+        // Add 2-3 choices leading to other nodes or end states
+        if (idx < dynamicNodes.length - 1) {
+          choices.push({
+            label: "Continue exploring",
+            next: `scene_${idx + 1}`,
+          });
+        }
+
+        if (idx > 0) {
+          choices.push({
+            label: "Go back",
+            next: `scene_${idx - 1}`,
+          });
+        }
+
+        // Add success/fail paths
+        if (idx >= dynamicNodes.length - 2) {
+          choices.push({
+            label: "Face the challenge",
+            next: "success",
+            reward: 50,
+          });
+          choices.push({
+            label: "Retreat",
+            next: "fail",
+            penalty: 10,
+          });
+        } else {
+          // Random item grants
+          if (idx % 2 === 0) {
+            choices.push({
+              label: "Search the area",
+              next: `scene_${Math.min(idx + 2, dynamicNodes.length - 1)}`,
+              grant: `key_${idx}`,
+            });
+          }
+        }
+
+        story[node.id] = {
+          text: node.text,
+          choices: choices.length > 0 ? choices : [{ label: "Continue", next: "start" }],
+        };
+      });
+
+      // Update start node to include dynamic paths
+      if (story.start && dynamicNodes.length > 0) {
+        const existingChoices = story.start.choices || [];
+        story.start.choices = [
+          ...existingChoices,
+          {
+            label: "Explore new territory",
+            next: "scene_0",
+          },
+        ];
+      }
+    }
+
+    return story;
   }
 
   async start() {
@@ -35,7 +121,7 @@ export class AdventureGame extends BaseGame {
   }
 
   getNode() {
-    return adventureData.story[this.gameData.nodeId];
+    return this.story[this.gameData.nodeId] || adventureData.story[this.gameData.nodeId];
   }
 
   async sendNode() {
@@ -224,8 +310,22 @@ export class AdventureGame extends BaseGame {
   }
 
   async endGame() {
+    // Clear vote timer
+    if (this.voteTimer) {
+      clearTimeout(this.voteTimer);
+      this.voteTimer = null;
+    }
     this.status = "ended";
     await this.end("completed");
+  }
+
+  async end(reason = "completed") {
+    // Clear vote timer
+    if (this.voteTimer) {
+      clearTimeout(this.voteTimer);
+      this.voteTimer = null;
+    }
+    await super.end(reason);
   }
 
   getGameName() {

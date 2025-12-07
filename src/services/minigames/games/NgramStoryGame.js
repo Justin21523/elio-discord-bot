@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logger } from "../../../util/logger.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const storySeeds = require("../../../../data/minigames/ngram-story.json");
@@ -20,6 +21,15 @@ export class NgramStoryGame extends BaseGame {
   }
 
   pickSeed() {
+    // Try training data seeds first
+    const trainingSeeds = TrainingDataLoader.getRandomStorySeeds(20);
+    if (trainingSeeds && trainingSeeds.length > 0) {
+      const randomSeed = trainingSeeds[Math.floor(Math.random() * trainingSeeds.length)];
+      logger.info(`[NgramStoryGame] Using training seed from ${randomSeed.character}`);
+      return randomSeed.seed;
+    }
+
+    // Fallback to static seeds
     const seeds = storySeeds.seeds || [];
     return seeds[Math.floor(Math.random() * seeds.length)] || "Once upon a time";
   }
@@ -68,11 +78,11 @@ export class NgramStoryGame extends BaseGame {
   }
 
   async generateNext(keyword) {
-    if (!AI_ENABLED || !this.options.ai?.markov) {
+    if (!AI_ENABLED || !this.options.aiService?.markov) {
       return `${keyword || "…"}`;
     }
     try {
-      const res = await this.options.ai.markov.generate({
+      const res = await this.options.aiService.markov.generate({
         seed: `${this.gameData.story.join(" ")} ${keyword}`,
         maxLen: 20,
         temperature: 0.9,

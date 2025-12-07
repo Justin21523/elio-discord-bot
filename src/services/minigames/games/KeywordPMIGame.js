@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logger } from "../../../util/logger.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const sourceData = require("../../../../data/minigames/docs.json");
@@ -21,6 +22,16 @@ export class KeywordPMIGame extends BaseGame {
   }
 
   buildTokens() {
+    // Try to get tokens from training data first
+    const pmiCorpus = TrainingDataLoader.getPMICorpus();
+
+    if (pmiCorpus && pmiCorpus.tokens && pmiCorpus.tokens.length > 100) {
+      logger.info(`[KeywordPMIGame] Using training corpus with ${pmiCorpus.tokens.length} tokens`);
+      return pmiCorpus.tokens;
+    }
+
+    // Fallback to static data
+    logger.info("[KeywordPMIGame] Using static corpus");
     return sourceData.documents
       .map((d) =>
         (d.text || "")
@@ -34,6 +45,7 @@ export class KeywordPMIGame extends BaseGame {
 
   async start() {
     this.status = "active";
+    this.startedAt = Date.now();
     await this.channel.send({
       embeds: [
         {
@@ -68,15 +80,49 @@ export class KeywordPMIGame extends BaseGame {
   }
 
   pickOptions(target) {
-    const opts = new Set();
-    while (opts.size < 4) {
-      opts.add(this.tokens[Math.floor(Math.random() * this.tokens.length)]);
+    // Get 3 random distractor words (not including target)
+    const distractors = new Set();
+    let attempts = 0;
+    while (distractors.size < 3 && attempts < 100) {
+      attempts++;
+      const word = this.tokens[Math.floor(Math.random() * this.tokens.length)];
+      if (word !== target) {
+        distractors.add(word);
+      }
     }
-    const arr = Array.from(opts);
-    // ensure target not in options
-    const replaceIdx = Math.floor(Math.random() * arr.length);
-    arr[replaceIdx] = this.tokens[Math.floor(Math.random() * this.tokens.length)];
-    return arr;
+
+    // Find the word with highest PMI to target (this will be the "best" answer)
+    let bestWord = target; // fallback
+    let bestPMI = -Infinity;
+    for (const word of distractors) {
+      const pmi = this.computePMI(target, word);
+      if (pmi > bestPMI) {
+        bestPMI = pmi;
+        bestWord = word;
+      }
+    }
+
+    // Build options array: 3 distractors + best word (which has highest PMI)
+    const options = Array.from(distractors);
+
+    // Shuffle the options
+    for (let i = options.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+
+    // If we don't have 4 options, add the best word
+    if (options.length < 4) {
+      options.push(bestWord);
+    }
+
+    // Shuffle again to randomize position
+    for (let i = options.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+
+    return options;
   }
 
   async handleAction(userId, action, data = {}) {

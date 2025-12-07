@@ -1,9 +1,14 @@
 /**
  * Enhanced Message Create Event with Complete Auto-Reply System
  *
+ * NEW TRIGGER RULES (2024-12):
+ * 1. MUST @tag the bot to trigger any response
+ * 2. @tag bot + persona name = respond with that persona's avatar webhook
+ * 3. @tag bot without persona name = respond as Elio (default)
+ * 4. Just persona name without @tag = NO response
+ * 5. Reply to bot/persona message = continue conversation with that persona
+ *
  * Features:
- * - Guaranteed reply on @mention or reply to bot
- * - Smart persona selection for multi-keyword messages
  * - Third-person pronoun filtering
  * - Conversation history tracking
  * - Multi-turn conversation support
@@ -14,6 +19,8 @@ import { createAutoReplyManager } from '../services/autoReply.js';
 import { fixThirdPersonPronouns, detectThirdPerson, removeFormatLeakage, ensureCompleteSentence } from '../utils/pronounFilter.js';
 import { createFeedbackButtons } from '../handlers/feedbackHandlers.js';
 import { interactionLogger } from '../services/interactionLogger.js';
+import { generatePersonaReply, isLlamaEnabled } from '../services/ai/adapters/llamaCppAdapter.js';
+import { USE_LLAMA_SERVER } from '../config.js';
 
 let autoReplyManager = null;
 
@@ -30,28 +37,41 @@ export async function execute(message, services) {
   // Skip if bot message
   if (message.author.bot) return;
 
-  // CRITICAL: Always respond to mentions and replies
+  // Handle !help command in channels
+  if (message.content.toLowerCase().trim() === '!help') {
+    console.log('[INT] !help command detected');
+    try {
+      const { showDMHelp } = await import('../handlers/dmHandlers.js');
+      await showDMHelp(message);
+    } catch (error) {
+      console.error('[ERR] Failed to show help:', error.message);
+    }
+    return;
+  }
+
   const botId = message.client.user.id;
+
+  // Check for @bot mention
   const isMentioned = message.mentions.has(botId) ||
                      message.mentions.users?.has(botId) ||
                      message.content.includes(`<@${botId}>`) ||
                      message.content.includes(`<@!${botId}>`);
 
+  // Check for reply to bot/persona
   let isReplyToBot = false;
   let repliedToPersona = null;
   if (message.reference) {
     try {
       const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
 
-      // CRITICAL: Check if reply is to bot OR to bot's webhook (persona messages)
+      // Check if reply is to bot OR to bot's webhook (persona messages)
       const isDirectBotMessage = repliedTo && repliedTo.author.id === botId;
       const isBotWebhook = repliedTo && repliedTo.webhookId && repliedTo.applicationId === botId;
 
       isReplyToBot = isDirectBotMessage || isBotWebhook;
 
-      // CRITICAL: Detect which persona sent the replied message (via webhook)
+      // Detect which persona sent the replied message (via webhook)
       if (isReplyToBot && repliedTo.webhookId) {
-        // Message sent via webhook - extract persona name from webhook username
         repliedToPersona = repliedTo.author.username;
         console.log(`[INT] Reply detected to persona: ${repliedToPersona}`);
       }
@@ -60,47 +80,65 @@ export async function execute(message, services) {
     }
   }
 
-  // Force reply if mentioned or replied to
-  const forceReply = isMentioned || isReplyToBot;
+  // NEW RULE: Must have @mention OR be replying to bot to trigger response
+  if (!isMentioned && !isReplyToBot) {
+    // No @tag and not a reply = no response (even if persona name is mentioned)
+    return;
+  }
 
   try {
-    // Check if should reply
-    const decision = await autoReplyManager.shouldReplyToMessage(message);
+    // Determine which persona to use
+    let selectedPersona = null;
+    let reason = '';
 
-    // Override decision if force reply
-    if (forceReply && !decision.shouldReply) {
-      console.log(`[INT] Force reply override - mentioned: ${isMentioned}, replied: ${isReplyToBot}`);
-      decision.shouldReply = true;
-      decision.reason = isMentioned ? 'bot_tagged_override' : 'reply_override';
-      // CRITICAL: If replying to a specific persona, use THAT persona
-      // If @mentioned, force reselect based on content (ignore active conversation)
-      const forceReselect = isMentioned;
-      decision.persona = repliedToPersona || await autoReplyManager.selectPersonaForMessage(message, message.content.toLowerCase(), forceReselect);
-    }
+    if (isReplyToBot && repliedToPersona) {
+      // Replying to a specific persona - continue with that persona
+      selectedPersona = repliedToPersona;
+      reason = 'reply_to_persona';
+      console.log(`[INT] Continuing conversation with ${repliedToPersona}`);
+    } else if (isMentioned) {
+      // @mentioned - check for persona name in message
+      const contentWithoutMention = message.content
+        .replace(/<@!?\d+>/g, '') // Remove @mentions
+        .toLowerCase()
+        .trim();
 
-    // CRITICAL: If user replied to a specific persona, override with that persona
-    if (isReplyToBot && repliedToPersona && decision.shouldReply) {
-      console.log(`[INT] Overriding persona to ${repliedToPersona} (user replied to this persona's message)`);
-      decision.persona = repliedToPersona;
-    }
-
-    if (!decision.shouldReply) {
-      // Log skipped messages with low relevance for debugging
-      if (decision.relevance !== undefined && decision.relevance > 0) {
-        console.log(`[INT] Skipped message (relevance: ${decision.relevance.toFixed(3)}): ${message.content.substring(0, 50)}...`);
+      // Get all personas and check if any name is in the message
+      const personaList = await services.personas.listPersonas();
+      if (personaList.ok) {
+        for (const p of personaList.data) {
+          const namePattern = new RegExp(`\\b${p.name.toLowerCase()}\\b`, 'i');
+          if (namePattern.test(contentWithoutMention)) {
+            selectedPersona = p.name;
+            reason = 'bot_mention_with_persona';
+            console.log(`[INT] @mention + persona name detected: ${p.name}`);
+            break;
+          }
+        }
       }
+
+      // If no persona name found, default to Elio
+      if (!selectedPersona) {
+        selectedPersona = 'Elio';
+        reason = 'bot_mention_default';
+        console.log('[INT] @mention without persona name - using Elio');
+      }
+    }
+
+    if (!selectedPersona) {
+      console.log('[INT] No valid trigger - not replying');
       return;
     }
 
-    console.log(`[INT] Auto-reply triggered: ${decision.reason}, persona: ${decision.persona}, relevance: ${decision.relevance?.toFixed(3) || 'N/A'}`);
+    console.log(`[INT] Auto-reply triggered: ${reason}, persona: ${selectedPersona}`);
 
     // Show typing indicator
     await message.channel.sendTyping();
 
     // Get persona
-    const personaResult = await services.personas.getPersona(decision.persona);
+    const personaResult = await services.personas.getPersona(selectedPersona);
     if (!personaResult.ok) {
-      console.error(`[ERR] Persona not found: ${decision.persona}`);
+      console.error(`[ERR] Persona not found: ${selectedPersona}`);
       // Fallback to Elio if persona not found
       const fallbackResult = await services.personas.getPersona('Elio');
       if (!fallbackResult.ok) {
@@ -140,27 +178,68 @@ export async function execute(message, services) {
       content: h.content
     }));
 
-    // Use hybrid ensemble system (Markov + TF-IDF + HMM + Thompson Sampling + more)
-    let result = await services.ai.hybrid.reply({
-      persona: persona.name,
-      message: message.content,
-      history: conversationContext,
-      userId: message.author.id,
-      channelId: message.channelId,
-      topK: 5,
-      maxLen: 80
-    });
+    let result;
+    let strategyUsedOverride = null;
 
-    // Fallback: if hybrid fails, use basic persona logic
-    if (!result.ok) {
-      console.warn('[WARN] Hybrid reply failed, falling back to personaLogic');
-      result = await services.ai.personaLogic.reply({
+    // Check if llama.cpp is enabled - use it as primary for all personas
+    if (USE_LLAMA_SERVER && isLlamaEnabled()) {
+      console.log(`[INT] Using llama.cpp for ${persona.name} (may take 20-30s)`);
+
+      // Use llama.cpp with persona's system_prompt
+      const llamaResult = await generatePersonaReply(
+        message.content,
+        persona, // Pass full persona object with system_prompt
+        conversationContext
+      );
+
+      if (llamaResult.ok) {
+        result = {
+          ok: true,
+          data: {
+            text: llamaResult.data.text,
+            strategy: 'llama.cpp',
+            tokensUsed: llamaResult.data.tokensUsed,
+            latencyMs: llamaResult.data.latencyMs,
+          }
+        };
+        strategyUsedOverride = 'llama.cpp';
+        console.log(`[INT] llama.cpp replied in ${llamaResult.data.latencyMs}ms`);
+      } else {
+        console.warn('[WARN] llama.cpp failed, falling back to hybrid:', llamaResult.error?.message);
+        // Fallback to hybrid if llama.cpp fails
+        result = await services.ai.hybrid.reply({
+          persona: persona.name,
+          message: message.content,
+          history: conversationContext,
+          userId: message.author.id,
+          channelId: message.channelId,
+          topK: 5,
+          maxLen: 80
+        });
+      }
+    } else {
+      // Use hybrid ensemble system (Markov + TF-IDF + HMM + Thompson Sampling + more)
+      result = await services.ai.hybrid.reply({
         persona: persona.name,
         message: message.content,
         history: conversationContext,
+        userId: message.author.id,
+        channelId: message.channelId,
         topK: 5,
         maxLen: 80
       });
+
+      // Fallback: if hybrid fails, use basic persona logic
+      if (!result.ok) {
+        console.warn('[WARN] Hybrid reply failed, falling back to personaLogic');
+        result = await services.ai.personaLogic.reply({
+          persona: persona.name,
+          message: message.content,
+          history: conversationContext,
+          topK: 5,
+          maxLen: 80
+        });
+      }
     }
 
     if (!result.ok) {
@@ -191,7 +270,7 @@ export async function execute(message, services) {
     }
 
     // Get the strategy used for feedback tracking
-    const strategyUsed = result.data?.strategy || result.data?.metadata?.strategy || 'unknown';
+    const strategyUsed = strategyUsedOverride || result.data?.strategy || result.data?.metadata?.strategy || 'unknown';
 
     // Log interaction immediately to get ID for feedback buttons
     let interactionId = null;

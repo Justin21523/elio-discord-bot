@@ -8,6 +8,7 @@ import { BaseGame } from "../BaseGame.js";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { logger } from "../../../util/logger.js";
 import { AI_ENABLED } from "../../../config.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const triviaData = require("../../../../data/minigames/trivia.json");
@@ -68,13 +69,48 @@ export class TriviaGame extends BaseGame {
   }
 
   generateQuestions() {
+    // First, try to get questions from training data
+    const trainingQuestions = TrainingDataLoader.getRandomTrivia(
+      this.gameData.totalQuestions * 2, // Get extra to have variety
+      this.gameData.topic !== "mixed" ? this.gameData.topic : null
+    );
+
+    // Also get static questions from JSON files
     const topics = { ...(triviaData?.topics || {}), ...(triviaExpanded?.topics || {}) };
-    let pool = [];
+    let staticPool = [];
 
     if (this.gameData.topic === "mixed") {
-      pool = Object.values(topics).flat();
+      staticPool = Object.values(topics).flat();
     } else {
-      pool = topics[this.gameData.topic] || [];
+      staticPool = topics[this.gameData.topic] || [];
+    }
+
+    // Convert training questions to trivia format
+    const trainingPool = trainingQuestions.map(tq => ({
+      question: tq.question,
+      options: this.shuffleOptions([tq.correctAnswer, ...tq.wrongOptions]),
+      correctIndex: 0, // Will be recalculated after shuffle
+      _correctAnswer: tq.correctAnswer,
+      source: "training",
+      character: tq.character,
+    })).map(q => {
+      // Fix correctIndex after shuffle
+      q.correctIndex = q.options.findIndex(opt => opt === q._correctAnswer);
+      delete q._correctAnswer;
+      return q;
+    }).filter(q => q.options.length >= 2 && q.correctIndex >= 0);
+
+    // Merge pools - prioritize training data for variety
+    let pool = [];
+    if (trainingPool.length > 0) {
+      pool = [...trainingPool];
+      logger.info(`[TRIVIA] Loaded ${trainingPool.length} questions from training data`);
+    }
+
+    // Add static questions as fallback
+    if (staticPool.length > 0) {
+      const shuffledStatic = [...staticPool].sort(() => Math.random() - 0.5);
+      pool = [...pool, ...shuffledStatic];
     }
 
     if (pool.length === 0) {
@@ -82,8 +118,21 @@ export class TriviaGame extends BaseGame {
       this.gameData.questions = [];
       return;
     }
+
+    // Shuffle and select required number
     const shuffled = [...pool].sort(() => Math.random() - 0.5);
     this.gameData.questions = shuffled.slice(0, this.gameData.totalQuestions);
+
+    logger.info(`[TRIVIA] Generated ${this.gameData.questions.length} questions`);
+  }
+
+  shuffleOptions(options) {
+    const shuffled = [...options].filter(Boolean);
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, 4); // Max 4 options
   }
 
   async askQuestion() {

@@ -1,13 +1,24 @@
 """
 LLM Service - Text generation using various LLM models
+Supports both full-size (16GB+ VRAM) and lightweight (4GB VRAM) models
 """
 
 import torch
 from typing import List, Optional, Dict, Any
 from app.models.manager import model_manager
-from app.config import settings
-from app.utils.logger import log_info, log_error
+from app.config import settings, is_lightweight_model, VRAM_4GB_CONFIG
+from app.utils.logger import log_info, log_error, log_warning
 from app.utils.metrics import tokens_generated_total
+
+
+# Lightweight model optimizations
+LIGHTWEIGHT_MODEL_DEFAULTS = {
+    "max_tokens": 256,        # Reduced from 2048
+    "max_context": 2048,      # Reduced context window
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "repetition_penalty": 1.1,  # Helps with smaller models
+}
 
 
 class LLMService:
@@ -44,6 +55,21 @@ class LLMService:
         system_prompt = system or ""
         stop_sequences = stop
 
+        # Apply lightweight model optimizations if applicable
+        is_lightweight = is_lightweight_model(model_name)
+        if is_lightweight:
+            max_tokens = min(max_tokens, LIGHTWEIGHT_MODEL_DEFAULTS["max_tokens"])
+            log_info(f"Using lightweight model optimizations for {model_name}")
+
+        # Check VRAM before generation (for 4GB GPUs)
+        if torch.cuda.is_available():
+            vram_usage = model_manager.get_vram_usage()
+            if vram_usage > 3500:  # 3.5GB warning threshold
+                log_warning(
+                    f"High VRAM usage: {vram_usage}MB. Consider reducing max_tokens.",
+                    vram_mb=vram_usage,
+                )
+
         try:
             log_info(
                 "LLM generation started",
@@ -51,6 +77,7 @@ class LLMService:
                 prompt_length=len(prompt),
                 max_tokens=max_tokens,
                 use_finetuned=use_finetuned,
+                is_lightweight=is_lightweight,
             )
 
             # Load model and tokenizer
@@ -92,6 +119,10 @@ class LLMService:
                     "pad_token_id": tokenizer.pad_token_id,
                     "eos_token_id": tokenizer.eos_token_id,
                 }
+
+                # Add repetition penalty for lightweight models (helps quality)
+                if is_lightweight:
+                    gen_kwargs["repetition_penalty"] = LIGHTWEIGHT_MODEL_DEFAULTS.get("repetition_penalty", 1.1)
 
                 # Try to add stop_strings if supported (transformers 4.40+)
                 # Don't add if empty to avoid model validation errors

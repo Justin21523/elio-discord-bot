@@ -1,6 +1,9 @@
 /**
  * handlers/minigameHandlers.js
  * Handle button interactions for mini-games
+ *
+ * CRITICAL: Discord requires acknowledgement within 3 seconds.
+ * We MUST call deferUpdate() immediately before any game logic.
  */
 
 import GameManager from "../services/minigames/GameManager.js";
@@ -10,53 +13,34 @@ import { logger } from "../util/logger.js";
  * Handle button interaction from mini-game
  */
 export async function handleMinigameButton(interaction) {
-  try {
-    const customId = interaction.customId;
+  const customId = interaction.customId;
 
+  // Special case: recommended start buttons use prefix "minigame_start_<gameType>"
+  // These need a visible reply, not a deferred update
+  if (customId.startsWith("minigame_start_")) {
+    return handleRecommendedStart(interaction);
+  }
+
+  // CRITICAL: Acknowledge interaction IMMEDIATELY (within 3 seconds)
+  // This prevents "The application did not respond" errors
+  try {
+    await interaction.deferUpdate();
+  } catch (deferErr) {
+    // If defer fails, interaction likely already timed out or was handled
+    logger.warn("[MINIGAME_BUTTON] deferUpdate failed (interaction may have timed out)", {
+      customId,
+      error: deferErr.message,
+    });
+    return;
+  }
+
+  try {
     // Parse button customId to extract game info
     // Format: {gameType}_{action}_{sessionId}_{data}
     const parts = customId.split("_");
 
-    // Special case: recommended start buttons use prefix "minigame_start_<gameType>"
-    if (customId.startsWith("minigame_start_")) {
-      const gameType = customId.replace("minigame_start_", "");
-      // Reuse minigame start with defaults
-      await interaction.reply({
-        embeds: [
-          {
-            title: "🎮 Launching Recommended Game",
-            description: `Starting **${gameType}** ...`,
-            color: 0x2ecc71,
-          },
-        ],
-        ephemeral: true,
-      });
-      const { startGame } = await import("../services/minigames/GameManager.js");
-      const result = await startGame(gameType, interaction.channel, interaction.user, {
-        guildId: interaction.guildId,
-      });
-      if (!result.ok) {
-        await interaction.followUp({ content: `❌ ${result.error}`, ephemeral: true });
-      } else {
-        await interaction.followUp({
-          embeds: [
-            {
-              title: "✅ Game Started",
-              description: `Check the channel for **${gameType}**.`,
-              color: 0x2ecc71,
-            },
-          ],
-          ephemeral: true,
-        });
-      }
-      return;
-    }
-
     if (parts.length < 3) {
-      await interaction.reply({
-        content: "Invalid game button",
-        ephemeral: true,
-      });
+      await sendFollowUpError(interaction, "Invalid game button format.");
       return;
     }
 
@@ -69,87 +53,204 @@ export async function handleMinigameButton(interaction) {
     const game = GameManager.getGame(interaction.channel.id);
 
     if (!game) {
-      await interaction.reply({
-        content: "❌ This game has ended or is no longer active.",
-        ephemeral: true,
-      });
+      await sendFollowUpError(interaction, "This game has ended or is no longer active.");
       return;
     }
 
     // Verify session matches
     if (game.sessionId !== sessionId) {
-      await interaction.reply({
-        content: "❌ This button is from an old game session.",
-        ephemeral: true,
-      });
+      await sendFollowUpError(
+        interaction,
+        "This button is from an old game session. Start a new game with `/minigame start`."
+      );
       return;
     }
 
-    // Handle based on game type
-    let result;
+    // Handle based on game type and action
+    const result = await dispatchGameAction(game, gameType, action, dataIndex, interaction.user.id);
 
-    if (gameType === "trivia" && action === "answer") {
-      const answerIndex = parseInt(dataIndex, 10);
-      result = await game.handleAction(interaction.user.id, "answer", {
-        answerIndex,
-      });
-    } else if (gameType === "adventure" && action === "choice") {
-      const choiceIndex = parseInt(dataIndex, 10);
-      result = await game.handleAction(interaction.user.id, "choice", {
-        choiceIndex,
-      });
-    } else if (gameType === "reaction" && action === "click") {
-      result = await game.handleAction(interaction.user.id, "click", {});
-    } else if (gameType === "dice-roll" && action === "roll") {
-      result = await game.handleAction(interaction.user.id, "roll", {});
-    } else if (gameType === "adventure" && action === "choice") {
-      const choiceIndex = parseInt(dataIndex, 10);
-      result = await game.handleAction(interaction.user.id, "choice", { choiceIndex });
-    } else if (gameType === "battle" && action === "skill") {
-      const skillId = dataIndex;
-      result = await game.handleAction(interaction.user.id, "skill", { skillId });
-    } else if (gameType === "ngram-story" && action === "narrate") {
-      result = await game.handleAction(interaction.user.id, "narrate", { keyword: dataIndex || "" });
-    } else {
-      await interaction.reply({
-        content: "❌ Unknown game action",
-        ephemeral: true,
-      });
+    if (!result) {
+      await sendFollowUpError(interaction, "Unknown game action.");
       return;
     }
 
-    // Respond to interaction
-    if (result.ok) {
-      await interaction.deferUpdate().catch(() => {});
-    } else {
-      await interaction.reply({
-        content: `❌ ${result.error}`,
-        ephemeral: true,
-      }).catch(() => {
-        // Ignore if can't reply
-      });
+    if (!result.ok) {
+      await sendFollowUpError(interaction, result.error || "Action failed.");
     }
 
     logger.debug("[MINIGAME_BUTTON] Handled", {
       gameType,
       action,
       userId: interaction.user.id,
-      result: result.ok,
+      success: result?.ok ?? false,
     });
   } catch (error) {
     logger.error("[MINIGAME_BUTTON] Error:", {
+      customId,
       error: error.message,
       stack: error.stack,
     });
 
-    try {
-      await interaction.reply({
-        content: "❌ An error occurred processing your action.",
+    await sendFollowUpError(interaction, "An error occurred processing your action.");
+  }
+}
+
+/**
+ * Handle "minigame_start_<gameType>" buttons from recommendations
+ */
+async function handleRecommendedStart(interaction) {
+  const customId = interaction.customId;
+  const gameType = customId.replace("minigame_start_", "");
+
+  try {
+    // Reply first (ephemeral acknowledgement)
+    await interaction.reply({
+      embeds: [
+        {
+          title: "🎮 Launching Game",
+          description: `Starting **${gameType}**...`,
+          color: 0x2ecc71,
+        },
+      ],
+      ephemeral: true,
+    });
+
+    // Start the game
+    const result = await GameManager.startGame(
+      gameType,
+      interaction.channel,
+      interaction.user,
+      { guildId: interaction.guildId }
+    );
+
+    if (!result.ok) {
+      await interaction.followUp({
+        content: `❌ ${result.error}`,
         ephemeral: true,
       });
-    } catch (replyError) {
+    }
+  } catch (error) {
+    logger.error("[MINIGAME_BUTTON] handleRecommendedStart error:", {
+      gameType,
+      error: error.message,
+    });
+
+    try {
+      if (interaction.replied) {
+        await interaction.followUp({
+          content: "❌ Failed to start game.",
+          ephemeral: true,
+        });
+      } else {
+        await interaction.reply({
+          content: "❌ Failed to start game.",
+          ephemeral: true,
+        });
+      }
+    } catch {
       // Ignore reply errors
     }
+  }
+}
+
+/**
+ * Dispatch action to the appropriate game handler
+ *
+ * IMPORTANT: Action names MUST match what the game's handleAction() expects:
+ * - HMMSequenceGame expects "next" (not "predict")
+ * - PMIAssociationGame expects "pmi" (not "answer")
+ * - KeywordPMIGame expects "pmichoice" (not "answer")
+ * - IRDocHuntGame expects "docquery"/"docanswer" (not "select")
+ */
+async function dispatchGameAction(game, gameType, action, dataIndex, userId) {
+  // Map of gameType_action -> handler function
+  const handlers = {
+    // Trivia
+    trivia_answer: () => {
+      const answerIndex = parseInt(dataIndex, 10);
+      return game.handleAction(userId, "answer", { answerIndex });
+    },
+
+    // Adventure
+    adventure_choice: () => {
+      const choiceIndex = parseInt(dataIndex, 10);
+      return game.handleAction(userId, "choice", { choiceIndex });
+    },
+
+    // Reaction
+    reaction_click: () => game.handleAction(userId, "click", {}),
+
+    // Dice Roll
+    "dice-roll_roll": () => game.handleAction(userId, "roll", {}),
+
+    // Battle
+    battle_skill: () => game.handleAction(userId, "skill", { skillId: dataIndex }),
+
+    // Guess Number
+    guess_guess: () => {
+      const guessValue = parseInt(dataIndex, 10);
+      return game.handleAction(userId, "guess", { value: guessValue });
+    },
+
+    // N-gram Story
+    "ngram-story_narrate": () => game.handleAction(userId, "narrate", { keyword: dataIndex || "" }),
+    "ngram-story_word": () => game.handleAction(userId, "word", { word: dataIndex || "" }),
+
+    // PMI Association - expects "pmi" action with { guess: string }
+    pmi_answer: () => {
+      return game.handleAction(userId, "pmi", { guess: dataIndex || "" });
+    },
+
+    // Keyword PMI - expects "pmichoice" action with { option: number }
+    "keyword-pmi_answer": () => {
+      const optionNum = parseInt(dataIndex, 10) + 1; // Button index is 0-based, game expects 1-based
+      return game.handleAction(userId, "pmichoice", { option: optionNum });
+    },
+
+    // IR Clue - expects "clue" or "answer" actions
+    "ir-clue_answer": () => {
+      return game.handleAction(userId, "answer", { text: dataIndex || "" });
+    },
+    "ir-clue_clue": () => {
+      return game.handleAction(userId, "clue", { query: dataIndex || "" });
+    },
+
+    // Doc Hunt - expects "docquery" or "docanswer" actions
+    "doc-hunt_select": () => {
+      return game.handleAction(userId, "docquery", { query: dataIndex || "" });
+    },
+    "doc-hunt_answer": () => {
+      return game.handleAction(userId, "docanswer", { text: dataIndex || "" });
+    },
+
+    // HMM Sequence - expects "next" action (not "predict")
+    hmm_predict: () => game.handleAction(userId, "next", {}),
+    hmm_next: () => game.handleAction(userId, "next", {}),
+  };
+
+  const key = `${gameType}_${action}`;
+  const handler = handlers[key];
+
+  if (handler) {
+    return handler();
+  }
+
+  // Fallback: try generic handleAction
+  logger.warn("[MINIGAME_BUTTON] Using fallback handler", { gameType, action });
+  return game.handleAction(userId, action, { data: dataIndex });
+}
+
+/**
+ * Send an ephemeral error follow-up (after deferUpdate)
+ */
+async function sendFollowUpError(interaction, message) {
+  try {
+    await interaction.followUp({
+      content: `❌ ${message}`,
+      ephemeral: true,
+    });
+  } catch (err) {
+    logger.warn("[MINIGAME_BUTTON] followUp failed", { error: err.message });
   }
 }
 

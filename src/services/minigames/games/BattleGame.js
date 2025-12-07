@@ -107,6 +107,30 @@ export class BattleGame extends BaseGame {
   }
 
   async start() {
+    // Auto-add bot opponent if only one player
+    if (this.players.length === 1 && !this.players.some((p) => p.isBot)) {
+      const difficulty = this.options.difficulty || "normal";
+      this.players.push(
+        this.makeFighter({ id: "bot_opponent", username: "Battle Bot" }, true, difficulty)
+      );
+      await this.initBotAI();
+    }
+
+    // Verify we have 2 players
+    if (this.players.length < 2) {
+      await this.channel.send({
+        embeds: [
+          {
+            title: "⚔️ Battle",
+            description: "❌ Need at least 2 players to start a battle. Use `/minigame start type:battle vs_bot:true` to fight a bot!",
+            color: 0xe74c3c,
+          },
+        ],
+      });
+      this.status = "ended";
+      return;
+    }
+
     this.status = "active";
     this.startedAt = Date.now();
     await this.sendState("Battle started! Choose a skill.");

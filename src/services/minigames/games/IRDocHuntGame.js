@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logger } from "../../../util/logger.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const docData = require("../../../../data/minigames/docs.json");
@@ -13,19 +14,49 @@ const docData = require("../../../../data/minigames/docs.json");
 export class IRDocHuntGame extends BaseGame {
   async initialize() {
     await super.initialize();
-    this.docs = docData.documents || [];
+
+    // Load documents from training data + static data
+    this.docs = this.loadDocuments();
+
     this.gameData = {
       queriesLeft: 4,
       target: this.pickDoc(),
     };
   }
 
+  loadDocuments() {
+    // Get documents from training data
+    const trainingDocs = TrainingDataLoader.getRandomPassages(50);
+
+    // Get static documents
+    const staticDocs = docData.documents || [];
+
+    // Merge both sources
+    const merged = [
+      ...trainingDocs.map((d, idx) => ({
+        id: d.id || `train_${idx}`,
+        answer: d.character || d.scenario || "Mystery",
+        text: d.text || d.passage,
+        source: "training",
+      })),
+      ...staticDocs.map(d => ({ ...d, source: "static" })),
+    ];
+
+    logger.info(`[IRDocHuntGame] Loaded ${merged.length} documents (${trainingDocs.length} from training, ${staticDocs.length} static)`);
+
+    return merged;
+  }
+
   pickDoc() {
+    if (this.docs.length === 0) {
+      return { id: "fallback", answer: "Unknown", text: "No documents available" };
+    }
     return this.docs[Math.floor(Math.random() * this.docs.length)];
   }
 
   async start() {
     this.status = "active";
+    this.startedAt = Date.now();
     await this.channel.send({
       embeds: [
         {
@@ -68,7 +99,7 @@ export class IRDocHuntGame extends BaseGame {
     };
   }
 
-  handleAnswer(userId, text) {
+  async handleAnswer(userId, text) {
     if (!text) return { ok: false, error: "Answer required" };
     const norm = text.trim().toLowerCase();
     const target = this.gameData.target.answer.toLowerCase();
@@ -76,16 +107,30 @@ export class IRDocHuntGame extends BaseGame {
       this.winner = this.getPlayer(userId) || { userId, username: "player" };
       this.winner.won = true;
       this.status = "ended";
+
+      // Send victory message
+      await this.channel.send({
+        embeds: [
+          {
+            title: "🎉 Document Found!",
+            description: `<@${userId}> found the answer: **${this.gameData.target.answer}**`,
+            color: 0x2980b9,
+          },
+        ],
+      });
+
+      // Clean up game session
+      await this.end("completed");
       return { ok: true, correct: true, target: this.gameData.target.answer };
     }
     return { ok: true, correct: false };
   }
 
   async remoteDocSearch(query) {
-    if (!AI_ENABLED || !this.options.ai?.ir) {
+    if (!AI_ENABLED || !this.options.aiService?.ir) {
       return { ok: false, error: { message: "IR service not enabled" } };
     }
-    return this.options.ai.ir.docSearch({
+    return this.options.aiService.ir.docSearch({
       docs: this.docs.map((d) => ({ id: d.id, text: d.text })),
       query,
     });

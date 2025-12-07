@@ -168,7 +168,7 @@ settings = Settings()
 
 # Model Registry
 MODEL_REGISTRY = {
-    # LLM Models
+    # LLM Models (Full size - 16GB+ VRAM)
     "deepseek": "deepseek-ai/deepseek-llm-7b-chat",
     "deepseek-coder": "deepseek-ai/deepseek-coder-6.7b-instruct",
     "llama3": "meta-llama/Meta-Llama-3-8B-Instruct",
@@ -186,7 +186,65 @@ MODEL_REGISTRY = {
     "bge-large-en": "BAAI/bge-large-en-v1.5",
 }
 
+# Lightweight LLM Models (4GB VRAM / CPU-only)
+LIGHTWEIGHT_MODELS = {
+    "tinyllama": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "phi3-mini": "microsoft/Phi-3-mini-4k-instruct",
+    "qwen25-1.5b": "Qwen/Qwen2.5-1.5B-Instruct",
+    "smollm": "HuggingFaceTB/SmolLM-1.7B-Instruct",
+    "stablelm-zephyr": "stabilityai/stablelm-zephyr-3b",
+}
+
+# GGUF Models for llama-cpp-python (most efficient)
+GGUF_MODELS = {
+    "phi3-mini-gguf": "microsoft/Phi-3-mini-4k-instruct-gguf",
+    "tinyllama-gguf": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+    "qwen25-1.5b-gguf": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+}
+
+# 4GB VRAM Optimized Configuration
+VRAM_4GB_CONFIG = {
+    "default_model": "phi3-mini",
+    "use_4bit": True,
+    "max_new_tokens": 256,
+    "max_batch_size": 1,
+    "context_length": 2048,
+}
+
+# VRAM-based model selection thresholds (in MB)
+VRAM_MODEL_THRESHOLDS = {
+    16000: "qwen25",        # 16GB+ -> Full 7B model
+    8000: "stablelm-zephyr",  # 8GB -> 3B model
+    6000: "phi3-mini",      # 6GB -> Phi-3 Mini (quality)
+    4000: "qwen25-1.5b",    # 4GB -> Qwen 1.5B
+    2000: "tinyllama",      # 2GB -> TinyLlama
+    0: "tinyllama",         # CPU fallback
+}
+
 
 def get_model_id(alias: str) -> str:
-    """Get HuggingFace model ID from alias"""
-    return MODEL_REGISTRY.get(alias, alias)
+    """Get HuggingFace model ID from alias (checks all registries)"""
+    # Check main registry first
+    if alias in MODEL_REGISTRY:
+        return MODEL_REGISTRY[alias]
+    # Then check lightweight models
+    if alias in LIGHTWEIGHT_MODELS:
+        return LIGHTWEIGHT_MODELS[alias]
+    # Then check GGUF models
+    if alias in GGUF_MODELS:
+        return GGUF_MODELS[alias]
+    # Return as-is (assume it's a full model ID)
+    return alias
+
+
+def select_model_for_vram(vram_mb: int) -> str:
+    """Auto-select the best model based on available VRAM"""
+    for threshold, model in sorted(VRAM_MODEL_THRESHOLDS.items(), reverse=True):
+        if vram_mb >= threshold:
+            return model
+    return "tinyllama"  # Ultimate fallback
+
+
+def is_lightweight_model(alias: str) -> bool:
+    """Check if a model is a lightweight model"""
+    return alias in LIGHTWEIGHT_MODELS or alias in GGUF_MODELS

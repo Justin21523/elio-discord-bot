@@ -6,7 +6,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import Optional, Tuple, Dict, Any
 import threading
-from app.config import settings, get_model_id
+from app.config import settings, get_model_id, select_model_for_vram, is_lightweight_model, VRAM_4GB_CONFIG
 from app.utils.logger import log_info, log_error, log_warning
 from app.utils.metrics import model_load_duration_seconds, active_models
 import time
@@ -90,6 +90,100 @@ class ModelManager:
         else:
             log_warning("Using CPU device - this will be slow!")
             return torch.device("cpu")
+
+    @staticmethod
+    def detect_vram() -> int:
+        """
+        Detect available GPU VRAM in MB
+
+        Returns:
+            VRAM in MB, or 0 if no GPU available
+        """
+        if torch.cuda.is_available():
+            try:
+                # Get total memory of the first GPU
+                total_memory = torch.cuda.get_device_properties(0).total_memory
+                vram_mb = total_memory // (1024 ** 2)
+                log_info(f"Detected GPU VRAM: {vram_mb} MB")
+                return vram_mb
+            except Exception as e:
+                log_warning(f"Failed to detect VRAM: {e}")
+                return 0
+        return 0
+
+    @staticmethod
+    def get_vram_usage() -> int:
+        """
+        Get current VRAM usage in MB
+
+        Returns:
+            Current VRAM usage in MB, or 0 if no GPU
+        """
+        if torch.cuda.is_available():
+            try:
+                allocated = torch.cuda.memory_allocated(0)
+                return allocated // (1024 ** 2)
+            except Exception:
+                return 0
+        return 0
+
+    @staticmethod
+    def get_vram_free() -> int:
+        """
+        Get free VRAM in MB
+
+        Returns:
+            Free VRAM in MB, or 0 if no GPU
+        """
+        if torch.cuda.is_available():
+            try:
+                total = torch.cuda.get_device_properties(0).total_memory
+                allocated = torch.cuda.memory_allocated(0)
+                reserved = torch.cuda.memory_reserved(0)
+                free = total - max(allocated, reserved)
+                return free // (1024 ** 2)
+            except Exception:
+                return 0
+        return 0
+
+    def auto_select_model(self) -> str:
+        """
+        Automatically select the best model based on available VRAM
+
+        Returns:
+            Model alias suitable for current hardware
+        """
+        vram_mb = self.detect_vram()
+        selected = select_model_for_vram(vram_mb)
+
+        log_info(
+            "Auto-selected model based on VRAM",
+            vram_mb=vram_mb,
+            selected_model=selected,
+            is_lightweight=is_lightweight_model(selected),
+        )
+
+        return selected
+
+    def check_vram_warning(self, threshold_mb: int = 3800) -> bool:
+        """
+        Check if VRAM usage is approaching limit (for 4GB GPUs)
+
+        Args:
+            threshold_mb: Warning threshold in MB (default 3.8GB for 4GB cards)
+
+        Returns:
+            True if usage is above threshold
+        """
+        usage = self.get_vram_usage()
+        if usage > threshold_mb:
+            log_warning(
+                f"VRAM usage high: {usage}MB > {threshold_mb}MB threshold",
+                usage_mb=usage,
+                threshold_mb=threshold_mb,
+            )
+            return True
+        return False
 
     def load_model(self, model_name: str, model_type: str = "llm") -> Tuple[Any, Any]:
         """

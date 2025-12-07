@@ -2,16 +2,22 @@ import { createRequire } from "module";
 import { BaseGame } from "../BaseGame.js";
 import { AI_ENABLED } from "../../../config.js";
 import { logger } from "../../../util/logger.js";
+import TrainingDataLoader from "../TrainingDataLoader.js";
 
 const require = createRequire(import.meta.url);
 const seqData = require("../../../../data/minigames/sequence.json");
 
 /**
  * HMM sequence game: player advances steps, transitions sampled by probabilities and flavored text.
+ * Enhanced with training data for dynamic state generation.
  */
 export class HMMSequenceGame extends BaseGame {
   async initialize() {
     await super.initialize();
+
+    // Build dynamic states from training data + static data
+    this.states = this.buildStates();
+
     this.gameData = {
       state: "start",
       steps: 0,
@@ -19,13 +25,68 @@ export class HMMSequenceGame extends BaseGame {
     };
   }
 
+  buildStates() {
+    // Start with static states
+    const states = { ...seqData.states };
+
+    // Try to get dynamic states from training data
+    const trainingSeeds = TrainingDataLoader.getRandomStorySeeds(30);
+
+    if (trainingSeeds && trainingSeeds.length > 10) {
+      logger.info(`[HMMSequenceGame] Enhancing with ${trainingSeeds.length} training seeds`);
+
+      // Create dynamic intermediate states from training data
+      const dynamicStates = trainingSeeds.slice(0, 10).map((seed, idx) => ({
+        id: `dynamic_${idx}`,
+        text: seed.seed,
+        character: seed.character,
+      }));
+
+      // Add dynamic states with transitions
+      dynamicStates.forEach((ds, idx) => {
+        const nextStates = {};
+
+        // Connect to other dynamic states or end states
+        if (idx < dynamicStates.length - 1) {
+          nextStates[`dynamic_${idx + 1}`] = 0.4;
+        }
+        if (states.success) nextStates.success = 0.2;
+        if (states.fail) nextStates.fail = 0.1;
+        if (states.partial) nextStates.partial = 0.15;
+
+        // Add some randomness to other dynamic states
+        const otherIdx = (idx + 3) % dynamicStates.length;
+        if (otherIdx !== idx) {
+          nextStates[`dynamic_${otherIdx}`] = 0.15;
+        }
+
+        states[ds.id] = {
+          text: ds.text,
+          transitions: nextStates,
+        };
+      });
+
+      // Update start state to include dynamic transitions
+      if (states.start && dynamicStates.length > 0) {
+        states.start.transitions = {
+          ...states.start.transitions,
+          dynamic_0: 0.3,
+          dynamic_1: 0.2,
+        };
+      }
+    }
+
+    return states;
+  }
+
   async start() {
     this.status = "active";
+    this.startedAt = Date.now();
     await this.sendState("Sequence started");
   }
 
   currentNode() {
-    return seqData.states[this.gameData.state];
+    return this.states[this.gameData.state] || seqData.states[this.gameData.state];
   }
 
   async handleAction(userId, action, data = {}) {

@@ -464,6 +464,8 @@ async function handleRecommend(interaction) {
   await interaction.deferReply({ ephemeral: true });
   let recs;
   let strategy = "local";
+
+  // Try AI-based recommendations first
   if (interaction.client.services?.ai?.recs) {
     const res = await interaction.client.services.ai.recs.recommendGames({
       userId: interaction.user.id,
@@ -475,28 +477,40 @@ async function handleRecommend(interaction) {
       strategy = res.data.strategy || "backend";
     }
   }
+
+  // Fall back to local recommender
   if (!recs) {
     recs = await recommendGames(interaction.user.id, interaction.guildId);
   }
 
+  // If still no recommendations, provide default popular games
   if (!recs || recs.length === 0) {
-    await interaction.editReply({ content: "📊 Not enough data yet. Play a few games first!" });
-    return;
+    recs = getDefaultRecommendations();
+    strategy = "popular";
   }
 
   const lines = recs.map((r, idx) => {
     const score = r.score?.toFixed?.(2) || r.score;
-    const reason = r.reason ? `\nReason: ${r.reason}` : "";
-    return `${idx + 1}. ${prettyName(r.game)} (score: ${score})${reason}`;
+    const reason = r.reason ? `\n   _${r.reason}_` : "";
+    return `${idx + 1}. **${prettyName(r.game)}** (score: ${score})${reason}`;
   });
+
+  const isNewUser = strategy === "popular";
+  const description = isNewUser
+    ? "🌟 **New player?** Here are our most popular games to get you started:\n\n" + lines.join("\n\n")
+    : lines.join("\n\n");
 
   await interaction.editReply({
     embeds: [
       {
         title: "🎯 Recommended Games for You",
-        description: lines.join("\n"),
+        description,
         color: 0x1abc9c,
-        footer: { text: `Strategy: ${strategy} | Based on play history / win rate / achievements / popularity` },
+        footer: {
+          text: isNewUser
+            ? "Play a few games to get personalized recommendations!"
+            : `Strategy: ${strategy} | Based on play history / win rate / achievements`,
+        },
       },
     ],
     components: [
@@ -505,12 +519,35 @@ async function handleRecommend(interaction) {
         components: recs.slice(0, 3).map((r) => ({
           type: 2,
           style: 1,
-          label: prettyName(r.game),
+          label: `▶️ ${prettyName(r.game)}`,
           custom_id: `minigame_start_${r.game}`,
         })),
       },
     ],
   });
+}
+
+/**
+ * Default recommendations for new users or when no data is available
+ */
+function getDefaultRecommendations() {
+  return [
+    {
+      game: "trivia",
+      score: 5.0,
+      reason: "Test your Communiverse knowledge!",
+    },
+    {
+      game: "reaction",
+      score: 4.5,
+      reason: "Quick and fun - great for warming up!",
+    },
+    {
+      game: "adventure",
+      score: 4.0,
+      reason: "Explore story paths with choices.",
+    },
+  ];
 }
 
 function prettyName(game) {
@@ -547,7 +584,7 @@ async function handleStatus(interaction, services) {
 }
 
 async function handleGuess(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const value = interaction.options.getInteger("value");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -575,7 +612,7 @@ async function handleGuess(interaction, services) {
 }
 
 async function handleClue(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const query = interaction.options.getString("query");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -605,7 +642,7 @@ async function handleClue(interaction, services) {
 }
 
 async function handleAnswer(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const text = interaction.options.getString("text");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -633,7 +670,7 @@ async function handleAnswer(interaction, services) {
 }
 
 async function handleDocQuery(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const query = interaction.options.getString("query");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -663,7 +700,7 @@ async function handleDocQuery(interaction, services) {
 }
 
 async function handleDocAnswer(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const text = interaction.options.getString("text");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -691,7 +728,7 @@ async function handleDocAnswer(interaction, services) {
 }
 
 async function handleNarrate(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const keyword = interaction.options.getString("keyword") || "";
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -712,7 +749,7 @@ async function handleNarrate(interaction, services) {
 }
 
 async function handlePMI(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const guess = interaction.options.getString("guess");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -733,7 +770,7 @@ async function handlePMI(interaction, services) {
 }
 
 async function handlePMIChoice(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const option = interaction.options.getInteger("option");
   const game = GameManager.getGame(interaction.channel.id);
 
@@ -754,7 +791,7 @@ async function handlePMIChoice(interaction, services) {
 }
 
 async function handleNext(interaction, services) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply(); // Game actions are public
   const game = GameManager.getGame(interaction.channel.id);
   if (!game || game.constructor.name !== "HMMSequenceGame") {
     await interaction.editReply({

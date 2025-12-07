@@ -81,14 +81,14 @@ export class DiceRollGame extends BaseGame {
     }
 
     if (this.gameData.rolls.length >= this.gameData.maxRounds) {
-      this.finishGame();
+      await this.finishGame();
       return { ok: true, endReason: "max_rounds" };
     }
 
     return { ok: true };
   }
 
-  finishGame() {
+  async finishGame() {
     if (this.status === "ended") return;
     this.status = "ended";
 
@@ -101,6 +101,31 @@ export class DiceRollGame extends BaseGame {
       this.winner = this.getPlayer(top.userId) || { userId: top.userId };
       this.winner.won = true;
     }
+
+    // Send final results
+    await this.channel.send({
+      embeds: [
+        {
+          title: "🎲 Dice Duel - Final Results",
+          description: this.winner
+            ? `🏆 <@${this.winner.userId}> wins!`
+            : "No winner - no rolls recorded.",
+          color: 0x9b59b6,
+          fields: [
+            {
+              name: "All Rolls",
+              value:
+                sorted.length > 0
+                  ? sorted.map((r) => `<@${r.userId}>: **${r.value}**`).join("\n")
+                  : "No rolls",
+            },
+          ],
+        },
+      ],
+    });
+
+    // Clean up game session
+    await this.end("completed");
   }
 
   randomRoll() {
