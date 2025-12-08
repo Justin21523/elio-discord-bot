@@ -264,6 +264,7 @@ from app.api.routers import (
     hybrid_router,
     game_ai_router,
     reload_router,
+    web_search_router,
 )
 
 app.include_router(markov_router.router, prefix="/markov", tags=["Markov"])
@@ -273,6 +274,7 @@ app.include_router(persona_logic_router.router, tags=["Persona-Logic"])
 app.include_router(hybrid_router.router, tags=["Hybrid"])
 app.include_router(game_ai_router.router, tags=["Game-AI"])
 app.include_router(reload_router.router, tags=["Reload"])
+app.include_router(web_search_router.router, prefix="/agent", tags=["WebSearch"])
 
 # GPU-based routers (conditionally loaded)
 if not is_cpu_only_mode():

@@ -132,6 +132,28 @@ export async function ensureIndexes() {
   await db.collection('privacy_settings').createIndex({ userId: 1, guildId: 1 });
   await db.collection('privacy_settings').createIndex({ requestedDeletion: 1 });
 
+  // social_media_shares: deduplication for social media monitor job
+  await db.collection('social_media_shares').createIndex(
+    { url: 1, guildId: 1 },
+    { unique: true }
+  );
+  await db.collection('social_media_shares').createIndex({ source: 1, sharedAt: -1 });
+  // TTL index for automatic cleanup (30 days retention)
+  await db.collection('social_media_shares').createIndex(
+    { sharedAt: 1 },
+    { expireAfterSeconds: 30 * 24 * 60 * 60, name: 'social_media_shares_ttl' }
+  );
+
+  // video_transcripts: YouTube video transcripts for analysis
+  await db.collection('video_transcripts').createIndex({ videoId: 1 }, { unique: true });
+  await db.collection('video_transcripts').createIndex({ url: 1 });
+  await db.collection('video_transcripts').createIndex({ fetchedAt: -1 });
+  // TTL index for transcripts (90 days retention)
+  await db.collection('video_transcripts').createIndex(
+    { fetchedAt: 1 },
+    { expireAfterSeconds: 90 * 24 * 60 * 60, name: 'video_transcripts_ttl' }
+  );
+
   console.log(`[JOB] indexes ensured (validators ${validatorsApplied ? "applied" : "skipped"})`);
   await client.close();
 }

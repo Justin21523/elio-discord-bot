@@ -1227,4 +1227,171 @@ export const commands = [
       },
     ],
   },
+
+  // Social Media Monitor Configuration
+  {
+    name: "config-social",
+    description: "Configure social media monitor (Elio news sharing)",
+    default_member_permissions: "8", // Administrator
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "view",
+        description: "View current social media monitor configuration",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "enable",
+        description: "Enable social media monitor",
+        options: [
+          { type: 7, name: "channel1", description: "First channel to post news", required: true, channel_types: [0] },
+          { type: 7, name: "channel2", description: "Second channel (optional)", required: false, channel_types: [0] },
+          { type: 7, name: "channel3", description: "Third channel (optional)", required: false, channel_types: [0] },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "disable",
+        description: "Disable social media monitor",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "set-frequency",
+        description: "Set how often to search for news",
+        options: [
+          {
+            type: 3, // STRING
+            name: "frequency",
+            description: "Search frequency",
+            required: true,
+            choices: [
+              { name: "Every hour", value: "1h" },
+              { name: "Every 2 hours (default)", value: "2h" },
+              { name: "Every 4 hours", value: "4h" },
+              { name: "Every 6 hours", value: "6h" },
+              { name: "Every 12 hours", value: "12h" },
+              { name: "Daily", value: "24h" },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "set-limit",
+        description: "Set maximum shares per run",
+        options: [
+          {
+            type: 4, // INTEGER
+            name: "max-shares",
+            description: "Maximum news items to share per run (1-10)",
+            required: true,
+            min_value: 1,
+            max_value: 10,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "toggle-source",
+        description: "Enable or disable a news source",
+        options: [
+          {
+            type: 3, // STRING
+            name: "source",
+            description: "News source to toggle",
+            required: true,
+            choices: [
+              { name: "Reddit", value: "reddit" },
+              { name: "YouTube", value: "youtube" },
+              { name: "Twitter/X", value: "twitter" },
+              { name: "News (Variety, THR, etc)", value: "news" },
+            ],
+          },
+          { type: 5, name: "enabled", description: "Enable or disable this source", required: true },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "run-now",
+        description: "Immediately run the social media monitor",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "add-channel",
+        description: "Add a channel to receive news",
+        options: [
+          { type: 7, name: "channel", description: "Channel to add", required: true, channel_types: [0] },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "remove-channel",
+        description: "Remove a channel from receiving news",
+        options: [
+          { type: 7, name: "channel", description: "Channel to remove", required: true, channel_types: [0] },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "set-channel-pattern",
+        description: "Set a pattern to match channel names (e.g., 'news', 'elio')",
+        options: [
+          { type: 3, name: "pattern", description: "Channel name pattern (case-insensitive, use * for wildcard)", required: true },
+          { type: 5, name: "enabled", description: "Enable or disable pattern matching", required: false },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "clear-channel-pattern",
+        description: "Clear channel name pattern and use explicit channel list only",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "set-server-mode",
+        description: "Set server filter mode (include or exclude)",
+        options: [
+          {
+            type: 3, // STRING
+            name: "mode",
+            description: "Include only listed servers, or exclude listed servers",
+            required: true,
+            choices: [
+              { name: "Include (only listed servers)", value: "include" },
+              { name: "Exclude (all except listed)", value: "exclude" },
+              { name: "All servers (no filter)", value: "all" },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "add-server",
+        description: "Add a server to the include/exclude list",
+        options: [
+          { type: 3, name: "server-id", description: "Server ID to add (or 'current' for this server)", required: true },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "remove-server",
+        description: "Remove a server from the include/exclude list",
+        options: [
+          { type: 3, name: "server-id", description: "Server ID to remove (or 'current' for this server)", required: true },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "add-channel-by-id",
+        description: "Add a channel from ANY server by its ID",
+        options: [
+          { type: 3, name: "channel-id", description: "Channel ID to add (17-20 digit number)", required: true },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "list-all-channels",
+        description: "List all channels across all servers that match the pattern",
+      },
+    ],
+  },
 ];

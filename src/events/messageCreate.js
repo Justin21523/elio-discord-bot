@@ -1,12 +1,14 @@
 /**
  * Enhanced Message Create Event with Complete Auto-Reply System
  *
- * NEW TRIGGER RULES (2024-12):
- * 1. MUST @tag the bot to trigger any response
+ * TRIGGER RULES (2024-12):
+ * 1. @tag the bot = respond
  * 2. @tag bot + persona name = respond with that persona's avatar webhook
  * 3. @tag bot without persona name = respond as Elio (default)
- * 4. Just persona name without @tag = NO response
- * 5. Reply to bot/persona message = continue conversation with that persona
+ * 4. Reply to bot/persona message = continue conversation with that persona
+ * 5. "PersonaName: message" format = user is RPing as that persona, bot responds
+ *    - Example: "Caleb: hey what's up" → user is RPing as Caleb, bot responds
+ *    - Just "Caleb hey" without colon = NO response (unless @tagged)
  *
  * Features:
  * - Third-person pronoun filtering
@@ -17,9 +19,8 @@
 import { Events } from 'discord.js';
 import { createAutoReplyManager } from '../services/autoReply.js';
 import { fixThirdPersonPronouns, detectThirdPerson, removeFormatLeakage, ensureCompleteSentence } from '../utils/pronounFilter.js';
-import { createFeedbackButtons } from '../handlers/feedbackHandlers.js';
 import { interactionLogger } from '../services/interactionLogger.js';
-import { generatePersonaReply, isLlamaEnabled, checkLlamaHealth } from '../services/ai/adapters/llamaCppAdapter.js';
+import { generatePersonaReply, isLlamaEnabled, checkLlamaHealth, analyzeConversationContext } from '../services/ai/adapters/llamaCppAdapter.js';
 import { USE_LLAMA_SERVER } from '../config.js';
 import { localPersonaReply } from '../services/ai/localPersonaFallback.js';
 
@@ -137,6 +138,53 @@ function detectAddressee(content, personaList) {
   return { persona: mentions[0].name, reason: 'first_mentioned' };
 }
 
+/**
+ * Detect if user is RPing as a persona using "PersonaName:" prefix format.
+ * This triggers a response even without @mentioning the bot.
+ *
+ * Examples:
+ * - "Caleb: hey what's up" → { isRp: true, rpAsPersona: 'Caleb', messageContent: 'hey what\'s up' }
+ * - "caleb: *waves*" → { isRp: true, rpAsPersona: 'Caleb', messageContent: '*waves*' }
+ * - "Caleb hey" → { isRp: false } (no colon = not RP format)
+ *
+ * @param {string} content - Message content
+ * @param {Array<{name: string}>} personaList - Available personas
+ * @returns {{ isRp: boolean, rpAsPersona?: string, messageContent?: string }}
+ */
+function detectRpPrefix(content, personaList) {
+  // Match pattern: PersonaName: (case insensitive, with optional whitespace)
+  // Must be at the start of the message
+  const rpPrefixMatch = content.match(/^(\w+)\s*:\s*(.+)/s);
+
+  console.log(`[RP-DEBUG] Checking RP prefix for: "${content.substring(0, 50)}..."`);
+  console.log(`[RP-DEBUG] Regex match result:`, rpPrefixMatch ? `name="${rpPrefixMatch[1]}"` : 'no match');
+
+  if (!rpPrefixMatch) {
+    return { isRp: false };
+  }
+
+  const potentialName = rpPrefixMatch[1].toLowerCase();
+  const messageContent = rpPrefixMatch[2].trim();
+
+  console.log(`[RP-DEBUG] Looking for persona "${potentialName}" in list:`, personaList.map(p => p.name));
+
+  // Check if the prefix matches a known persona
+  for (const p of personaList) {
+    if (p.name.toLowerCase() === potentialName) {
+      console.log(`[RP-DEBUG] MATCH FOUND: ${p.name}`);
+      return {
+        isRp: true,
+        rpAsPersona: p.name,
+        messageContent: messageContent
+      };
+    }
+  }
+
+  // Prefix doesn't match any persona
+  console.log(`[RP-DEBUG] No matching persona found`);
+  return { isRp: false };
+}
+
 let autoReplyManager = null;
 
 export const name = Events.MessageCreate;
@@ -195,9 +243,31 @@ export async function execute(message, services) {
     }
   }
 
-  // NEW RULE: Must have @mention OR be replying to bot to trigger response
-  if (!isMentioned && !isReplyToBot) {
-    // No @tag and not a reply = no response (even if persona name is mentioned)
+  // Check for RP prefix format: "PersonaName: message"
+  // This triggers response even without @mention
+  let isRpPrefix = false;
+  let rpPrefixData = null;
+
+  // ALWAYS check for RP prefix, regardless of other triggers
+  console.log(`[RP-CHECK] Message from ${message.author.username}: "${message.content.substring(0, 80)}"`);
+  console.log(`[RP-CHECK] isMentioned=${isMentioned}, isReplyToBot=${isReplyToBot}`);
+
+  // Check RP prefix for ALL messages (not just non-mentioned ones)
+  const personaListForRp = await services.personas.listPersonas();
+  if (personaListForRp.ok) {
+    rpPrefixData = detectRpPrefix(message.content, personaListForRp.data);
+    isRpPrefix = rpPrefixData.isRp;
+    console.log(`[RP-CHECK] isRpPrefix=${isRpPrefix}`);
+    if (isRpPrefix) {
+      console.log(`[INT] RP prefix detected: user is RPing as ${rpPrefixData.rpAsPersona}`);
+    }
+  } else {
+    console.log(`[RP-CHECK] Failed to get persona list:`, personaListForRp.error);
+  }
+
+  // TRIGGER RULE: Must have @mention OR reply to bot OR RP prefix format
+  if (!isMentioned && !isReplyToBot && !isRpPrefix) {
+    // No valid trigger = no response
     return;
   }
 
@@ -205,12 +275,60 @@ export async function execute(message, services) {
     // Determine which persona to use
     let selectedPersona = null;
     let reason = '';
+    let rpContext = null; // Track if user is roleplaying as a character
 
     if (isReplyToBot && repliedToPersona) {
       // Replying to a specific persona - continue with that persona
       selectedPersona = repliedToPersona;
       reason = 'reply_to_persona';
       console.log(`[INT] Continuing conversation with ${repliedToPersona}`);
+    } else if (isRpPrefix && rpPrefixData) {
+      // User is RPing as a persona using "PersonaName:" prefix
+      // Select a DIFFERENT persona to respond (not the one they're RPing as)
+      rpContext = `roleplaying_as_${rpPrefixData.rpAsPersona}`;
+
+      // Get personas to find a suitable responder
+      const personaList = await services.personas.listPersonas();
+      if (personaList.ok) {
+        // Find another persona to respond - prefer based on character relationships
+        const rpPersonaLower = rpPrefixData.rpAsPersona.toLowerCase();
+
+        // Character relationship logic for better RP responses
+        const relationships = {
+          'elio': ['Bryce', 'Glordon', 'Olga'], // Elio's friends/family
+          'bryce': ['Elio', 'Caleb'],           // Bryce talks to Elio, used to be friends with Caleb
+          'caleb': ['Bryce', 'Elio'],           // Caleb bullies Elio, former friend of Bryce
+          'glordon': ['Elio', 'Ambassador Questa'], // Glordon's connections
+          'olga': ['Elio', 'Glordon'],          // Olga is Elio's aunt
+        };
+
+        // Try to find a related character, otherwise pick any different one
+        const relatedPersonas = relationships[rpPersonaLower] || [];
+        let responder = null;
+
+        // First try related personas
+        for (const relatedName of relatedPersonas) {
+          const found = personaList.data.find(p => p.name.toLowerCase() === relatedName.toLowerCase());
+          if (found) {
+            responder = found.name;
+            break;
+          }
+        }
+
+        // Fallback: pick any persona that isn't the one being RPed
+        if (!responder) {
+          const otherPersona = personaList.data.find(p => p.name.toLowerCase() !== rpPersonaLower);
+          if (otherPersona) {
+            responder = otherPersona.name;
+          }
+        }
+
+        if (responder) {
+          selectedPersona = responder;
+          reason = 'rp_prefix';
+          console.log(`[INT] RP prefix: user as ${rpPrefixData.rpAsPersona}, responding as ${responder}`);
+        }
+      }
     } else if (isMentioned) {
       // @mentioned - check for persona name in message
       const contentWithoutMention = message.content
@@ -230,6 +348,58 @@ export async function execute(message, services) {
           selectedPersona = detectedPersona;
           reason = `addressee_${detectionReason}`;
           console.log(`[INT] @mention + addressee detected: ${detectedPersona} (reason: ${detectionReason})`);
+        }
+
+        // LLM-based context analysis for complex scenarios (multiple personas mentioned or potential RP)
+        const llamaAvailableForAnalysis = await isLlamaServerAvailable();
+        const hasMultipleMentions = personaList.data.filter(p =>
+          contentWithoutMention.toLowerCase().includes(p.name.toLowerCase())
+        ).length > 1;
+        const hasRoleplayIndicators = /^\*[A-Za-z]/.test(contentWithoutMention.trim());
+
+        if (llamaAvailableForAnalysis && (hasMultipleMentions || hasRoleplayIndicators)) {
+          console.log('[INT] Running LLM context analysis...');
+
+          // Get conversation history for context
+          const existingHistory = services.conversationHistory?.getContext(
+            message.channelId,
+            message.author.id,
+            selectedPersona || 'Elio',
+            5
+          ) || [];
+
+          const contextAnalysis = await analyzeConversationContext(
+            contentWithoutMention,
+            existingHistory,
+            personaList.data.map(p => p.name)
+          );
+
+          if (contextAnalysis.ok && contextAnalysis.data.confidence >= 0.6) {
+            const analysis = contextAnalysis.data;
+
+            // Update persona selection based on LLM analysis
+            if (analysis.speaking_to && analysis.speaking_to !== 'unclear') {
+              // Verify the persona exists
+              const targetPersona = personaList.data.find(
+                p => p.name.toLowerCase() === analysis.speaking_to.toLowerCase()
+              );
+              if (targetPersona) {
+                selectedPersona = targetPersona.name;
+                reason = `context_analysis_${analysis.user_identity}`;
+                console.log(`[INT] LLM analysis: speaking_to=${analysis.speaking_to}, user_identity=${analysis.user_identity}, confidence=${analysis.confidence}`);
+              }
+            }
+
+            // Capture RP context if user is roleplaying
+            if (analysis.user_identity && analysis.user_identity.startsWith('roleplaying_as_')) {
+              rpContext = analysis.user_identity;
+              console.log(`[INT] User is roleplaying as: ${rpContext.replace('roleplaying_as_', '')}`);
+            }
+          } else if (contextAnalysis.ok) {
+            console.log(`[INT] LLM analysis confidence too low: ${contextAnalysis.data?.confidence || 0}`);
+          } else {
+            console.log(`[INT] LLM analysis failed, using regex-based detection`);
+          }
         }
       }
 
@@ -308,7 +478,8 @@ export async function execute(message, services) {
       const llamaResult = await generatePersonaReply(
         message.content,
         persona, // Pass full persona object with system_prompt
-        conversationContext
+        conversationContext,
+        { rpContext } // Pass RP context for roleplay scenarios
       );
 
       if (llamaResult.ok) {
@@ -414,33 +585,21 @@ export async function execute(message, services) {
       console.log('[WARN] Failed to log interaction:', logError.message);
     }
 
-    // Create feedback buttons if we have an interaction ID
-    const feedbackRow = interactionId ? createFeedbackButtons(interactionId) : null;
-
     // Send response via webhook to show persona's avatar and name
     try {
-      const messageOptions = {
-        content: `<@${message.author.id}> ${responseText}`,
-      };
-      if (feedbackRow) {
-        messageOptions.components = [feedbackRow];
-      }
-
       await services.webhooks.personaSay(
         message.channelId,
         {
           name: persona.name,
           avatar: persona.avatar
         },
-        messageOptions
+        {
+          content: `<@${message.author.id}> ${responseText}`,
+        }
       );
     } catch (webhookError) {
       console.log(`[WARN] Webhook failed, using reply fallback:`, webhookError.message);
-      const replyOptions = { content: responseText };
-      if (feedbackRow) {
-        replyOptions.components = [feedbackRow];
-      }
-      await message.reply(replyOptions);
+      await message.reply({ content: responseText });
     }
 
     // Record conversation (CRITICAL: per-user isolation)
@@ -464,7 +623,7 @@ export async function execute(message, services) {
     // Track bot reply for multi-turn conversation
     autoReplyManager.recordBotReply(message.channelId, message.author.id, persona.name);
 
-    console.log(`[INT] Auto-replied as ${persona.name} (${responseText.length} chars, strategy: ${strategyUsed})${hadThirdPerson ? ' [filtered]' : ''}`);
+    console.log(`[INT] Auto-replied as ${persona.name} (${responseText.length} chars, strategy: ${strategyUsed})${hadThirdPerson ? ' [filtered]' : ''}${rpContext ? ` [RP: ${rpContext.replace('roleplaying_as_', '')}]` : ''}`);
 
   } catch (error) {
     console.error('[ERR] messageCreate auto-reply error:', error);

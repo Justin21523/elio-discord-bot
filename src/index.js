@@ -39,6 +39,7 @@ import * as aiCmd from "./commands/ai.js";
 import * as ragCmd from "./commands/rag.js";
 import * as finetuneCmd from "./commands/finetune.js";
 import * as configProactiveCmd from "./commands/config-proactive.js";
+import * as configSocialCmd from "./commands/config-social.js";
 import { loadProactiveSchedules } from "./commands/config-proactive.js";
 import * as minigameCmd from "./commands/minigame.js";
 import * as adminDataCmd from "./commands/admin-data.js";
@@ -68,6 +69,7 @@ import * as autoMiniGame from "./jobs/autoMiniGame.js";
 import * as autoStoryWeave from "./jobs/autoStoryWeave.js";
 import * as autoWorldBuilder from "./jobs/autoWorldBuilder.js";
 import { createChannelHistorySyncJob } from "./jobs/channelHistorySync.js";
+import * as socialMediaMonitor from "./jobs/socialMediaMonitor.js";
 
 // Validate configuration on startup
 try {
@@ -134,6 +136,7 @@ function buildRouter() {
     ragCmd,
     finetuneCmd,
     configProactiveCmd,
+    configSocialCmd,
     minigameCmd,
     adminDataCmd,
     lootCmd,
@@ -257,7 +260,14 @@ function registerCronJobs() {
     }
   }
 
-  logger.info("[BOT] Registered 12 cron jobs (including 5 proactive AI features + channel history)");
+  // Social media monitor (every 2 hours) - PROACTIVE FEATURE
+  const SOCIAL_MEDIA_CRON = process.env.SOCIAL_MEDIA_CRON || "0 */2 * * *";
+  cron.schedule(SOCIAL_MEDIA_CRON, () => {
+    logger.info("[CRON] Running social_media_monitor");
+    socialMediaMonitor.run(client).catch((err) => logger.error("[CRON] social_media_monitor failed", err));
+  });
+
+  logger.info("[BOT] Registered 13 cron jobs (including 6 proactive AI features + channel history)");
 }
 
 // 7) Message handler (for both guild messages and DMs)
