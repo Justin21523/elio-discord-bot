@@ -1,7 +1,9 @@
 import React, { useMemo } from "react";
 
 import { getActiveNavItem, navItems, type NavItem } from "../router";
+import { disableDemoMode, isDemoMode } from "../demo";
 import type { DiscordGuild, MeResponse } from "../types";
+import { Tag } from "./ui";
 
 type Props = {
   me: MeResponse;
@@ -61,6 +63,22 @@ export function AppShell(props: Props) {
         <div className="topbarSpacer" />
 
         <div className="topbarControls">
+          {isDemoMode() ? (
+            <div className="rowGap">
+              <Tag tone="warn">demo</Tag>
+              <button
+                className="button"
+                type="button"
+                onClick={() => {
+                  disableDemoMode();
+                  window.location.href = "/";
+                }}
+              >
+                Exit demo
+              </button>
+            </div>
+          ) : null}
+
           <label className="selectLabel">
             <span className="selectLabelText">Guild</span>
             <select
@@ -223,4 +241,3 @@ function NavIcon(props: { id: string }) {
       );
   }
 }
-
