@@ -579,7 +579,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return;
       }
       const out = await fetchBotAdminJson("/health");
-      sendJson(res, 200, out);
+      sendJson(res, 200, { ok: true, data: out as Json });
       return;
     }
 
