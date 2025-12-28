@@ -321,6 +321,39 @@ async function handleRequest(
     return;
   }
 
+  // Local RAG search + reload
+  if (req.method === "POST" && path === "/api/ai/rag/search") {
+    const body = await readJson<{
+      query?: string;
+      topK?: number;
+      minScore?: number;
+      character?: string | null;
+    }>(req);
+
+    const query = String(body?.query || "").trim();
+    if (!query) {
+      sendJson(res, 400, { ok: false, error: "query is required" });
+      return;
+    }
+
+    const topK = clampInt(body?.topK, 1, 10, 3);
+    const minScore = clampNumber(body?.minScore, 0, 1, 0.05);
+    const character = typeof body?.character === "string" ? body.character : null;
+
+    const rag = await import("../services/ai/localRagSearch.js");
+    const results = rag.searchRag(query, { topK, minScore, character });
+
+    sendJson(res, 200, { ok: true, data: { results } as unknown as Json });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/api/ai/rag/reload") {
+    const rag = await import("../services/ai/localRagSearch.js");
+    rag.reloadRagDocuments();
+    sendJson(res, 200, { ok: true, data: { reloaded: true } as unknown as Json });
+    return;
+  }
+
   if (req.method === "GET" && path === "/") {
     sendHtml(res, 200, renderHomeHtml());
     return;

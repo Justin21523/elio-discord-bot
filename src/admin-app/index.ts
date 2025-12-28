@@ -542,6 +542,144 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // RAG sources (markdown files)
+    if (req.method === "GET" && pathname === "/api/rag/sources") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const q = (url.searchParams.get("q") || "").trim();
+      const limit = clampInt(url.searchParams.get("limit"), 1, 500, 200);
+
+      const rows = await listRagSources({ q, limit });
+      sendJson(res, 200, { ok: true, data: rows as unknown as Json });
+      return;
+    }
+
+    const ragSourceMatch = pathname.match(/^\/api\/rag\/sources\/([^/]+)$/);
+    if (req.method === "GET" && ragSourceMatch) {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const name = sanitizeRagFilename(decodeURIComponent(ragSourceMatch[1] || ""));
+      if (!name) {
+        sendJson(res, 400, { ok: false, error: "Invalid source name" });
+        return;
+      }
+
+      const doc = await readRagSource(name);
+      if (!doc) {
+        sendJson(res, 404, { ok: false, error: "Source not found" });
+        return;
+      }
+
+      sendJson(res, 200, { ok: true, data: doc as unknown as Json });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/rag/sources") {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "rag.upsertSource",
+          risk: "high",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const body = await readJson<Record<string, unknown>>(req);
+      const name = sanitizeRagFilename(typeof body.name === "string" ? body.name : "");
+      const content = typeof body.content === "string" ? body.content : "";
+
+      if (!name) {
+        sendJson(res, 400, { ok: false, error: "name must be a safe .md filename" });
+        return;
+      }
+      if (!content.trim()) {
+        sendJson(res, 400, { ok: false, error: "content is required" });
+        return;
+      }
+      if (content.length > 512_000) {
+        sendJson(res, 413, { ok: false, error: "content too large (max 512KB)" });
+        return;
+      }
+
+      const result = await writeRagSource({ name, content });
+      void triggerBotRagReload();
+
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "rag.upsertSource",
+        risk: "high",
+        ok: true,
+        req,
+        meta: {
+          name,
+          created: result.created,
+          sizeBytes: result.sizeBytes,
+          title: result.title,
+        },
+      });
+
+      sendJson(res, 200, { ok: true, data: result as unknown as Json });
+      return;
+    }
+
+    if (req.method === "DELETE" && ragSourceMatch) {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "rag.deleteSource",
+          risk: "high",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const name = sanitizeRagFilename(decodeURIComponent(ragSourceMatch[1] || ""));
+      if (!name) {
+        sendJson(res, 400, { ok: false, error: "Invalid source name" });
+        return;
+      }
+
+      const deleted = await deleteRagSource(name);
+      if (deleted) void triggerBotRagReload();
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "rag.deleteSource",
+        risk: "high",
+        ok: deleted,
+        req,
+        meta: { name },
+      });
+
+      if (!deleted) {
+        sendJson(res, 404, { ok: false, error: "Source not found" });
+        return;
+      }
+
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     // Audit log (read-only)
     if (req.method === "GET" && pathname === "/api/audit") {
       const limit = clampInt(url.searchParams.get("limit"), 1, 200, 100);
@@ -824,6 +962,73 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    if (req.method === "POST" && pathname === "/api/bot/ai/rag/search") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const body = await readJson<Record<string, unknown>>(req);
+      const query = typeof body.query === "string" ? body.query : null;
+
+      const out = await fetchBotAdminJson("/api/ai/rag/search", {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "rag.searchTest",
+        risk: "low",
+        ok: typeof out === "object" && out !== null ? Boolean((out as any).ok) : true,
+        req,
+        meta: { queryLen: typeof query === "string" ? query.length : null },
+      });
+
+      sendJson(res, 200, out);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/bot/ai/rag/reload") {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "rag.reload",
+          risk: "medium",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const out = await fetchBotAdminJson("/api/ai/rag/reload", {
+        method: "POST",
+        body: JSON.stringify({}),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "rag.reload",
+        risk: "medium",
+        ok: typeof out === "object" && out !== null ? Boolean((out as any).ok) : true,
+        req,
+        meta: null,
+      });
+
+      sendJson(res, 200, out);
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/bot/scheduler/jobs") {
       if (!isSuperAdmin && manageableGuildIds.length === 0) {
         sendJson(res, 403, { ok: false, error: "Forbidden" });
@@ -1086,6 +1291,162 @@ function sanitizeReturnTo(raw: string | null | undefined): string {
   return v;
 }
 
+type RagSourceRow = {
+  name: string;
+  title: string | null;
+  sizeBytes: number;
+  updatedAt: string;
+};
+
+type RagSourceDoc = RagSourceRow & {
+  content: string;
+};
+
+function getRagResourcesDir(): string {
+  const raw = (process.env.RAG_RESOURCES_DIR || "").trim();
+  if (raw) return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  return path.join(distRoot, "data", "rag-resources");
+}
+
+function sanitizeRagFilename(raw: string): string | null {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!name) return null;
+  if (name.length > 128) return null;
+  if (!name.endsWith(".md")) return null;
+  if (name.includes("/") || name.includes("\\")) return null;
+  if (name.includes("..")) return null;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.md$/.test(name)) return null;
+  return name;
+}
+
+async function listRagSources(params: { q: string; limit: number }): Promise<RagSourceRow[]> {
+  const dir = getRagResourcesDir();
+  let files: string[] = [];
+
+  try {
+    files = (await fs.readdir(dir)).filter((f) => f.endsWith(".md"));
+  } catch {
+    return [];
+  }
+
+  const q = params.q.trim().toLowerCase();
+
+  const rows: RagSourceRow[] = [];
+  for (const name of files) {
+    const safe = sanitizeRagFilename(name);
+    if (!safe) continue;
+    const fullPath = path.join(dir, safe);
+
+    try {
+      const stat = await fs.stat(fullPath);
+      const raw = await fs.readFile(fullPath, "utf8");
+      const title = parseRagTitleFromMarkdown(raw);
+
+      const row: RagSourceRow = {
+        name: safe,
+        title,
+        sizeBytes: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+      };
+
+      if (q) {
+        const hay = `${row.name} ${row.title || ""}`.toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+
+      rows.push(row);
+    } catch {
+      // ignore unreadable files
+    }
+  }
+
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return rows.slice(0, params.limit);
+}
+
+async function readRagSource(name: string): Promise<RagSourceDoc | null> {
+  const safe = sanitizeRagFilename(name);
+  if (!safe) return null;
+  const dir = getRagResourcesDir();
+  const fullPath = path.join(dir, safe);
+
+  try {
+    const [raw, stat] = await Promise.all([
+      fs.readFile(fullPath, "utf8"),
+      fs.stat(fullPath),
+    ]);
+
+    return {
+      name: safe,
+      title: parseRagTitleFromMarkdown(raw),
+      sizeBytes: stat.size,
+      updatedAt: stat.mtime.toISOString(),
+      content: raw,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeRagSource(params: { name: string; content: string }): Promise<RagSourceRow & { created: boolean }> {
+  const safe = sanitizeRagFilename(params.name);
+  if (!safe) throw new Error("Invalid filename");
+  const dir = getRagResourcesDir();
+  const fullPath = path.join(dir, safe);
+
+  await fs.mkdir(dir, { recursive: true });
+
+  let created = false;
+  try {
+    await fs.stat(fullPath);
+  } catch {
+    created = true;
+  }
+
+  await fs.writeFile(fullPath, params.content, "utf8");
+
+  const stat = await fs.stat(fullPath);
+  return {
+    name: safe,
+    title: parseRagTitleFromMarkdown(params.content),
+    sizeBytes: stat.size,
+    updatedAt: stat.mtime.toISOString(),
+    created,
+  };
+}
+
+async function deleteRagSource(name: string): Promise<boolean> {
+  const safe = sanitizeRagFilename(name);
+  if (!safe) return false;
+  const dir = getRagResourcesDir();
+  const fullPath = path.join(dir, safe);
+
+  try {
+    await fs.unlink(fullPath);
+    return true;
+  } catch (error: unknown) {
+    if ((error as any)?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function parseRagTitleFromMarkdown(markdown: string): string | null {
+  const raw = typeof markdown === "string" ? markdown : "";
+  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!match) return null;
+
+  const block = match[1] || "";
+  for (const line of block.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    if (key !== "title") continue;
+    const value = line.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
+    return value || null;
+  }
+  return null;
+}
+
 function canManageGuild(guilds: DiscordGuild[], guildId: string): boolean {
   const g = guilds.find((x) => x.id === guildId);
   if (!g) return false;
@@ -1102,6 +1463,19 @@ async function triggerBotSchedulerReload(guildId: string): Promise<void> {
     });
   } catch (error: unknown) {
     logError("Bot scheduler reload failed (non-fatal)", error);
+  }
+}
+
+async function triggerBotRagReload(): Promise<void> {
+  if (!config.botAdmin?.url) return;
+  try {
+    await fetchBotAdminJson("/api/ai/rag/reload", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error: unknown) {
+    logError("Bot RAG reload failed (non-fatal)", error);
   }
 }
 
