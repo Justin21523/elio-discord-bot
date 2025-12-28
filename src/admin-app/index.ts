@@ -593,12 +593,106 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    if (req.method === "GET" && pathname === "/api/bot/ai/llama/health") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+      const out = await fetchBotAdminJson("/api/ai/llama/health");
+      sendJson(res, 200, out);
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/bot/ai/llama/slots") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+      const out = await fetchBotAdminJson("/api/ai/llama/slots");
+      sendJson(res, 200, out);
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/bot/scheduler/jobs") {
       if (!isSuperAdmin && manageableGuildIds.length === 0) {
         sendJson(res, 403, { ok: false, error: "Forbidden" });
         return;
       }
       const out = await fetchBotAdminJson("/api/scheduler/jobs");
+      sendJson(res, 200, out);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/bot/runtime/restart") {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "runtime.restart",
+          risk: "critical",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const out = await fetchBotAdminJson("/api/runtime/restart", { method: "POST" });
+      const ok = typeof out === "object" && out !== null ? Boolean((out as any).ok) : true;
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "runtime.restart",
+        risk: "critical",
+        ok,
+        req,
+        meta: null,
+      });
+      sendJson(res, 200, out);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/bot/discord/deploy-commands") {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "discord.deployCommands",
+          risk: "critical",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const body = await readJson<{ scope?: string; guildId?: string }>(req);
+      const scope = typeof body.scope === "string" ? body.scope : undefined;
+      const guildId = typeof body.guildId === "string" ? body.guildId : undefined;
+
+      const out = await fetchBotAdminJson("/api/discord/deploy-commands", {
+        method: "POST",
+        body: JSON.stringify({ ...(scope ? { scope } : {}), ...(guildId ? { guildId } : {}) }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const ok = typeof out === "object" && out !== null ? Boolean((out as any).ok) : true;
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "discord.deployCommands",
+        risk: "critical",
+        ok,
+        req,
+        meta: { scope: scope || null, guildId: guildId || null },
+      });
+
       sendJson(res, 200, out);
       return;
     }

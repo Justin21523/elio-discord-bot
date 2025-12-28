@@ -6,6 +6,9 @@
 
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import pathModule from "node:path";
 import { logger } from "../util/logger.js";
 import { ChannelType } from "discord.js";
 import type { Client } from "discord.js";
@@ -174,6 +177,100 @@ async function handleRequest(
     return;
   }
 
+  // Runtime controls
+  if (req.method === "POST" && path === "/api/runtime/restart") {
+    sendJson(res, 200, { ok: true, data: { restarting: true } });
+    setTimeout(() => {
+      try {
+        process.kill(process.pid, "SIGTERM");
+      } catch (error: unknown) {
+        logger.error("[ADMIN] Failed to trigger restart", { error: getErrorMessage(error) });
+      }
+    }, 200);
+    return;
+  }
+
+  // Deploy slash commands via existing scripts (requires dist build)
+  if (req.method === "POST" && path === "/api/discord/deploy-commands") {
+    const body = await readJson<{ scope?: string; guildId?: string }>(req);
+    const scope = String(body?.scope || "").trim().toLowerCase();
+    const guildId = String(body?.guildId || "").trim();
+
+    const mode = scope || (guildId ? "guild" : "global");
+    if (mode !== "guild" && mode !== "global") {
+      sendJson(res, 400, { ok: false, error: "Invalid scope (expected guild|global)" });
+      return;
+    }
+    if (mode === "guild" && !/^\d{16,20}$/.test(guildId)) {
+      sendJson(res, 400, { ok: false, error: "Invalid guildId" });
+      return;
+    }
+
+    const script = mode === "global"
+      ? "dist/scripts/deploy-commands-global.js"
+      : "dist/scripts/deploy-commands.js";
+
+    if (!(await fileExists(script))) {
+      sendJson(res, 503, { ok: false, error: `Missing ${script}. Run npm run build first.` });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const result = await runNodeScript({
+      scriptPath: script,
+      env: mode === "guild" ? { GUILD_ID_DEV: guildId } : {},
+      timeoutMs: 180_000,
+    });
+
+    if (result.exitCode !== 0) {
+      sendJson(res, 500, {
+        ok: false,
+        error: "Command deployment failed",
+        data: {
+          exitCode: result.exitCode as unknown as Json,
+          durationMs: (Date.now() - startedAt) as unknown as Json,
+          stdout: truncate(result.stdout, 32_000) as unknown as Json,
+          stderr: truncate(result.stderr, 32_000) as unknown as Json,
+        },
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        exitCode: result.exitCode as unknown as Json,
+        durationMs: (Date.now() - startedAt) as unknown as Json,
+        stdout: truncate(result.stdout, 32_000) as unknown as Json,
+        stderr: truncate(result.stderr, 32_000) as unknown as Json,
+      },
+    });
+    return;
+  }
+
+  // llama.cpp status
+  if (req.method === "GET" && path === "/api/ai/llama/health") {
+    const llama = await import("../services/ai/adapters/llamaCppAdapter.js");
+    const data = {
+      enabled: llama.isLlamaEnabled(),
+      serverUrl: llama.getLlamaServerUrl(),
+      health: await llama.checkLlamaHealth(),
+    };
+    sendJson(res, 200, { ok: true, data: data as unknown as Json });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/api/ai/llama/slots") {
+    const llama = await import("../services/ai/adapters/llamaCppAdapter.js");
+    const data = {
+      enabled: llama.isLlamaEnabled(),
+      serverUrl: llama.getLlamaServerUrl(),
+      slots: await llama.getLlamaSlots(),
+    };
+    sendJson(res, 200, { ok: true, data: data as unknown as Json });
+    return;
+  }
+
   if (req.method === "GET" && path === "/") {
     sendHtml(res, 200, renderHomeHtml());
     return;
@@ -333,4 +430,51 @@ async function readBody(req: IncomingMessage): Promise<string> {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runNodeScript(params: {
+  scriptPath: string;
+  env: Record<string, string>;
+  timeoutMs: number;
+}): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const resolved = pathModule.resolve(process.cwd(), params.scriptPath);
+
+  return await new Promise((resolve) => {
+    const child = spawn(process.execPath, [resolved], {
+      env: { ...process.env, ...params.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+    }, params.timeoutMs);
+
+    child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
+    child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
+
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({
+        exitCode: typeof code === "number" ? code : 1,
+        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        stderr: Buffer.concat(stderrChunks).toString("utf8"),
+      });
+    });
+  });
+}
+
+function truncate(value: string, maxLen: number): string {
+  if (value.length <= maxLen) return value;
+  return value.slice(0, maxLen) + "\n…(truncated)…\n";
 }
