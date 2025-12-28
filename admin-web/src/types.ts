@@ -93,3 +93,32 @@ export type AuditLogRow = {
   meta: Record<string, unknown> | null;
 };
 
+export type PersonaSummary = {
+  id: string | null;
+  name: string;
+  enabled: boolean;
+  avatar: string | null;
+  avatarUrl: string | null;
+  color: number | null;
+  description: string | null;
+  updatedAt: string | null;
+};
+
+export type PersonaDoc = {
+  id: string | null;
+  name: string;
+  enabled: boolean;
+  avatar: string | null;
+  avatarUrl: string | null;
+  color: number | null;
+  description: string | null;
+  system_prompt: string | null;
+  openers: string[];
+  likes: string[];
+  dislikes: string[];
+  traits: Record<string, number>;
+  personality: string | null;
+  speaking_style: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};

@@ -1,12 +1,26 @@
-import type { AuditLogRow, BotChannel, BotHealth, BotMetrics, BotGuild, LlamaHealth, LlamaSlots, MeResponse, ScheduleRow } from "./types";
+import type {
+  AuditLogRow,
+  BotChannel,
+  BotHealth,
+  BotMetrics,
+  BotGuild,
+  LlamaHealth,
+  LlamaSlots,
+  MeResponse,
+  PersonaDoc,
+  PersonaSummary,
+  ScheduleRow,
+} from "./types";
 
 const DEMO_KEY = "admin_demo_mode";
 const SCHEDULES_KEY = "admin_demo_schedules_v1";
 const AUDIT_KEY = "admin_demo_audit_v1";
+const PERSONAS_KEY = "admin_demo_personas_v1";
 
 type DemoState = {
   schedulesByGuild: Record<string, ScheduleRow[]>;
   audit: AuditLogRow[];
+  personas: PersonaDoc[];
 };
 
 export function isDemoMode(): boolean {
@@ -66,6 +80,19 @@ export function demoGet<T>(path: string): T {
     return demoSchedulesList(guildId) as unknown as T;
   }
 
+  if (url.pathname === "/api/personas") {
+    const q = (url.searchParams.get("q") || "").trim();
+    const includeDisabled = url.searchParams.get("includeDisabled") === "true";
+    const limit = clampInt(url.searchParams.get("limit"), 1, 500, 200);
+    return demoPersonasList({ q, includeDisabled, limit }) as unknown as T;
+  }
+
+  const personaMatch = url.pathname.match(/^\/api\/personas\/([^/]+)$/);
+  if (personaMatch) {
+    const id = decodeURIComponent(personaMatch[1] || "");
+    return demoPersonaById(id) as unknown as T;
+  }
+
   if (url.pathname === "/api/audit") {
     const guildId = url.searchParams.get("guildId") || "";
     const risk = url.searchParams.get("risk") || "";
@@ -110,6 +137,43 @@ export function demoPost<T>(path: string, body: unknown): T {
     return ({ ok: true, message: "Demo: commands deployed" } as unknown) as T;
   }
 
+  if (url.pathname === "/api/bot/ai/persona/reply") {
+    const input = body as any;
+    const personaName = String(input?.personaName || "").trim();
+    const message = String(input?.message || "").trim();
+    const useRag = input?.useRag !== false;
+
+    const state = loadState();
+    const persona = state.personas.find((p) => p.name === personaName);
+
+    const result = !personaName || !message
+      ? { ok: false, error: { message: "personaName and message are required" } }
+      : !persona
+        ? { ok: false, error: { message: `Persona "${personaName}" not found` } }
+        : {
+            ok: true,
+            data: {
+              text: `${persona.name} (demo): ${message}`,
+              tokensEvaluated: 128,
+              tokensPredicted: 64,
+              tokensUsed: 192,
+              model: "demo-llama",
+              latencyMs: 220,
+              ...(useRag ? { ragSources: ["demo://rag/elioverse.md"] } : {}),
+            },
+          };
+
+    appendAudit({
+      action: "ai.personaReplyTest",
+      guildId: null,
+      risk: "low",
+      ok: Boolean((result as any).ok),
+      meta: { personaName, messageLen: message.length, useRag },
+    });
+
+    return result as unknown as T;
+  }
+
   const schedMatch = url.pathname.match(/^\/api\/guilds\/([^/]+)\/schedules$/);
   if (schedMatch) {
     const guildId = schedMatch[1]!;
@@ -150,6 +214,85 @@ export function demoPost<T>(path: string, body: unknown): T {
     });
 
     return undefined as unknown as T;
+  }
+
+  if (url.pathname === "/api/personas") {
+    const input = body as any;
+    const name = String(input?.name || "").trim();
+    if (!name) throw new Error("Demo: name is required");
+
+    const state = loadState();
+    const existing = state.personas.find((p) => p.name === name);
+    if (existing) throw new Error(`Demo: persona "${name}" already exists`);
+
+    const now = new Date().toISOString();
+    const doc: PersonaDoc = {
+      id: `demo_persona_${uuid()}`,
+      name,
+      enabled: input?.enabled !== false,
+      avatar: typeof input?.avatar === "string" ? input.avatar : null,
+      avatarUrl: typeof input?.avatarUrl === "string" ? input.avatarUrl : null,
+      color: typeof input?.color === "number" ? input.color : input?.color ? Number.parseInt(String(input.color), 10) : null,
+      description: typeof input?.description === "string" ? input.description : null,
+      system_prompt: typeof input?.system_prompt === "string" ? input.system_prompt : null,
+      openers: coerceStringArray(input?.openers),
+      likes: coerceStringArray(input?.likes),
+      dislikes: coerceStringArray(input?.dislikes),
+      traits: coerceNumberMap(input?.traits),
+      personality: typeof input?.personality === "string" ? input.personality : null,
+      speaking_style: typeof input?.speaking_style === "string" ? input.speaking_style : null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    state.personas = [doc, ...state.personas];
+    saveState(state);
+
+    appendAudit({ action: "personas.create", guildId: null, risk: "high", ok: true, meta: { id: doc.id, name } });
+
+    return ({ id: doc.id } as unknown) as T;
+  }
+
+  const personaMatch = url.pathname.match(/^\/api\/personas\/([^/]+)$/);
+  if (personaMatch) {
+    const id = decodeURIComponent(personaMatch[1] || "");
+    const input = body as any;
+    const name = String(input?.name || "").trim();
+    if (!name) throw new Error("Demo: name is required");
+
+    const state = loadState();
+    const idx = state.personas.findIndex((p) => p.id === id);
+    if (idx < 0) throw new Error("Demo: persona not found");
+
+    const existingName = state.personas.find((p) => p.name === name && p.id !== id);
+    if (existingName) throw new Error(`Demo: persona "${name}" already exists`);
+
+    const now = new Date().toISOString();
+    const prev = state.personas[idx]!;
+    const next: PersonaDoc = {
+      ...prev,
+      name,
+      enabled: input?.enabled !== false,
+      avatar: typeof input?.avatar === "string" ? input.avatar : null,
+      avatarUrl: typeof input?.avatarUrl === "string" ? input.avatarUrl : null,
+      color: typeof input?.color === "number" ? input.color : input?.color ? Number.parseInt(String(input.color), 10) : null,
+      description: typeof input?.description === "string" ? input.description : null,
+      system_prompt: typeof input?.system_prompt === "string" ? input.system_prompt : null,
+      openers: coerceStringArray(input?.openers),
+      likes: coerceStringArray(input?.likes),
+      dislikes: coerceStringArray(input?.dislikes),
+      traits: coerceNumberMap(input?.traits),
+      personality: typeof input?.personality === "string" ? input.personality : null,
+      speaking_style: typeof input?.speaking_style === "string" ? input.speaking_style : null,
+      updatedAt: now,
+    };
+
+    state.personas = state.personas.map((p) => (p.id === id ? next : p));
+    saveState(state);
+
+    appendAudit({ action: "personas.update", guildId: null, risk: "high", ok: true, meta: { id, name } });
+
+    return next as unknown as T;
   }
 
   throw new Error(`Demo API: no handler for POST ${url.pathname}`);
@@ -302,6 +445,7 @@ function loadState(): DemoState {
   const base: DemoState = {
     schedulesByGuild: defaultSchedules(),
     audit: defaultAudit(),
+    personas: defaultPersonas(),
   };
 
   try {
@@ -316,6 +460,12 @@ function loadState(): DemoState {
       const parsed = JSON.parse(rawAudit) as DemoState["audit"];
       if (Array.isArray(parsed)) base.audit = parsed;
     }
+
+    const rawPersonas = localStorage.getItem(PERSONAS_KEY);
+    if (rawPersonas) {
+      const parsed = JSON.parse(rawPersonas) as DemoState["personas"];
+      if (Array.isArray(parsed)) base.personas = parsed;
+    }
   } catch {
     // ignore
   }
@@ -327,6 +477,7 @@ function saveState(state: DemoState): void {
   try {
     localStorage.setItem(SCHEDULES_KEY, JSON.stringify(state.schedulesByGuild));
     localStorage.setItem(AUDIT_KEY, JSON.stringify(state.audit));
+    localStorage.setItem(PERSONAS_KEY, JSON.stringify(state.personas));
   } catch {
     // ignore
   }
@@ -392,6 +543,66 @@ function defaultAudit(): AuditLogRow[] {
   ];
 }
 
+function defaultPersonas(): PersonaDoc[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "demo_persona_elio",
+      name: "Elio",
+      enabled: true,
+      avatar: null,
+      avatarUrl: "https://cdn.discordapp.com/embed/avatars/0.png",
+      color: 3066993,
+      description: "Curious cosmic kid ambassador (demo)",
+      system_prompt: "You are Elio. Keep replies short, playful, and in-character.",
+      openers: ["cosmic hi!!", "wow hi there!"],
+      likes: ["space", "friends", "snacks"],
+      dislikes: ["bullies", "boring lectures"],
+      traits: { curiosity: 0.9, kindness: 0.8 },
+      personality: "friendly and enthusiastic",
+      speaking_style: "short, casual, kid-like",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "demo_persona_bryce",
+      name: "Bryce",
+      enabled: true,
+      avatar: null,
+      avatarUrl: "https://cdn.discordapp.com/embed/avatars/1.png",
+      color: 15105570,
+      description: "A redeemed friend with a calm vibe (demo)",
+      system_prompt: "You are Bryce. Keep it casual and supportive.",
+      openers: ["hey.", "yo what's up"],
+      likes: ["music", "hanging out"],
+      dislikes: ["drama"],
+      traits: { calm: 0.7, loyalty: 0.8 },
+      personality: "chill, protective",
+      speaking_style: "short, grounded",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "demo_persona_disabled",
+      name: "Old Persona (Disabled)",
+      enabled: false,
+      avatar: null,
+      avatarUrl: null,
+      color: null,
+      description: "Hidden unless includeDisabled=true (demo)",
+      system_prompt: null,
+      openers: [],
+      likes: [],
+      dislikes: [],
+      traits: {},
+      personality: null,
+      speaking_style: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+}
+
 function appendAudit(params: {
   action: string;
   guildId: string | null;
@@ -429,6 +640,64 @@ function clampInt(raw: string | null, min: number, max: number, fallback: number
   return Math.max(min, Math.min(max, n));
 }
 
+function demoPersonasList(params: { q: string; includeDisabled: boolean; limit: number }): PersonaSummary[] {
+  const q = params.q.trim().toLowerCase();
+  const state = loadState();
+
+  let rows = [...state.personas];
+  if (!params.includeDisabled) rows = rows.filter((p) => p.enabled);
+  if (q) {
+    rows = rows.filter((p) => {
+      const hay = `${p.name} ${p.description || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+
+  return rows.slice(0, params.limit).map((p) => ({
+    id: p.id,
+    name: p.name,
+    enabled: p.enabled,
+    avatar: p.avatar ?? null,
+    avatarUrl: p.avatarUrl ?? null,
+    color: typeof p.color === "number" ? p.color : null,
+    description: p.description ?? null,
+    updatedAt: p.updatedAt ?? null,
+  }));
+}
+
+function demoPersonaById(id: string): PersonaDoc {
+  const state = loadState();
+  const doc = state.personas.find((p) => p.id === id);
+  if (!doc) throw new Error("Demo: persona not found");
+  return doc;
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((x) => String(x)).map((x) => x.trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function coerceNumberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const n = typeof v === "number" ? v : Number.parseFloat(String(v));
+    if (!Number.isFinite(n)) continue;
+    out[k] = n;
+  }
+  return out;
+}
+
 function uuid(): string {
   try {
     return crypto.randomUUID();
@@ -436,4 +705,3 @@ function uuid(): string {
     return `u_${Math.random().toString(16).slice(2)}_${Date.now()}`;
   }
 }
-

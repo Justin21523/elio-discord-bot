@@ -269,12 +269,19 @@ code {
 }
 
 input,
-select {
+select,
+textarea {
   padding: 8px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   font-size: 13px;
   background: #fff;
+}
+
+textarea {
+  width: 100%;
+  font-family: inherit;
+  resize: vertical;
 }
 
 /* Pages */
@@ -598,4 +605,3 @@ select {
   color: var(--muted);
   font-size: 12px;
 }
-

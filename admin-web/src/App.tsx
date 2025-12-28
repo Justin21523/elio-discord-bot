@@ -11,6 +11,7 @@ import { LlmPage } from "./pages/Llm";
 import { AuditPage } from "./pages/Audit";
 import { MetricsPage } from "./pages/Metrics";
 import { RuntimePage } from "./pages/Runtime";
+import { PersonasPage } from "./pages/Personas";
 import { PlaceholderPage } from "./pages/Placeholder";
 import { normalizePathname } from "./router";
 import type { MeResponse } from "./types";
@@ -105,7 +106,7 @@ export default function App() {
       case "/runtime":
         return <RuntimePage me={me} selectedGuildId={selectedGuildId} />;
       case "/personas":
-        return <PlaceholderPage title="Personas" detail="Next: CRUD, avatar, and reply testbench." />;
+        return <PersonasPage me={me} selectedGuildId={selectedGuildId} />;
       case "/rag":
         return <PlaceholderPage title="RAG" detail="Next: upload, ingest, reindex, and query test." />;
       case "/economy":
@@ -185,4 +186,3 @@ function useLocalStorageString(key: string, defaultValue: string) {
 
   return [value, setValue] as const;
 }
-
