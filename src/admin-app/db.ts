@@ -15,6 +15,7 @@ export type AdminSession = {
   accessToken: string;
   refreshToken?: string;
   tokenExpiresAt: Date;
+  csrfToken?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -80,6 +81,23 @@ export async function getAdminSession(db: Db, sessionId: string): Promise<AdminS
 
 export async function deleteAdminSession(db: Db, sessionId: string): Promise<void> {
   await db.collection<AdminSession>("admin_sessions").deleteOne({ _id: sessionId });
+}
+
+export async function touchAdminSession(db: Db, sessionId: string, updatedAt: Date): Promise<void> {
+  await db
+    .collection<AdminSession>("admin_sessions")
+    .updateOne({ _id: sessionId }, { $set: { updatedAt } });
+}
+
+export async function setAdminSessionCsrfToken(
+  db: Db,
+  sessionId: string,
+  csrfToken: string,
+  updatedAt: Date
+): Promise<void> {
+  await db
+    .collection<AdminSession>("admin_sessions")
+    .updateOne({ _id: sessionId }, { $set: { csrfToken, updatedAt } });
 }
 
 export async function listSchedules(db: Db, guildId: string): Promise<ScheduleDoc[]> {

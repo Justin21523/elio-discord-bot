@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Plot from "react-plotly.js";
-import { apiDelete, apiGet, apiPost } from "./api";
+import { apiDelete, apiGet, apiPost, setCsrfToken } from "./api";
 
 type DiscordUser = {
   id: string;
@@ -20,6 +20,8 @@ type DiscordGuild = {
 type MeResponse = {
   user: DiscordUser;
   guilds: DiscordGuild[];
+  superAdmin?: boolean;
+  csrfToken?: string | null;
 };
 
 type ScheduleRow = {
@@ -72,12 +74,14 @@ export default function App() {
       try {
         const data = await apiGet<MeResponse>("/api/me");
         setMe(data);
+        setCsrfToken(data.csrfToken || null);
         const requestedGuildId = new URLSearchParams(window.location.search).get("guildId");
         const canUseRequested =
           requestedGuildId && data.guilds.some((g) => g.id === requestedGuildId);
         setSelectedGuildId(canUseRequested ? requestedGuildId : data.guilds?.[0]?.id || "");
       } catch (e) {
         setMe(null);
+        setCsrfToken(null);
       } finally {
         setLoading(false);
       }
@@ -183,6 +187,7 @@ export default function App() {
     setError(null);
     try {
       await apiPost("/api/logout", {});
+      setCsrfToken(null);
       window.location.href = "/";
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

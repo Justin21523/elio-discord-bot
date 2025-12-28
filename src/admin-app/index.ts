@@ -30,6 +30,8 @@ import {
   insertAuditLog,
   listAuditLogs,
   listSchedules,
+  setAdminSessionCsrfToken,
+  touchAdminSession,
   upsertAdminSession,
   upsertSchedule,
   disableSchedule,
@@ -51,11 +53,15 @@ import {
 } from "./http.js";
 
 const config = loadAdminAppConfig();
+const allowedOrigin = config.webOrigin.replace(/\/+$/, "");
 
 const { client: mongoClient, db } = await connectAdminDb({
   mongoUri: config.mongoUri,
   dbName: config.dbName,
 });
+
+const apiRate = createRateLimiter({ windowMs: 60_000, maxRequests: 300 });
+const authRate = createRateLimiter({ windowMs: 60_000, maxRequests: 40 });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,6 +97,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   const url = new URL(req.url || "/", `http://${config.host}:${config.port}`);
   const pathname = url.pathname;
+
+  setSecurityHeaders(res);
+  setCors(req, res);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const ip = getClientIp(req) || "unknown";
+  if (pathname.startsWith("/api/") && !apiRate.allow(ip)) {
+    sendJson(res, 429, { ok: false, error: "Rate limited" });
+    return;
+  }
+  if (pathname.startsWith("/auth/") && !authRate.allow(ip)) {
+    sendText(res, 429, "Rate limited");
+    return;
+  }
 
   // Health
   if (req.method === "GET" && pathname === "/health") {
@@ -241,6 +266,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         guilds,
         accessToken: token.access_token,
         tokenExpiresAt,
+        csrfToken: crypto.randomUUID(),
         createdAt: now,
         updatedAt: now,
         ...(token.refresh_token ? { refreshToken: token.refresh_token } : {}),
@@ -292,6 +318,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const isSuperAdmin = isSuperAdminUser(session.user.id);
     const manageableGuildIds = session.guilds.filter(userCanManageGuild).map((g) => g.id);
 
+    if (isUnsafeMethod(req.method) && !passesCsrf(req, session)) {
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "security.csrf",
+        risk: "medium",
+        ok: false,
+        req,
+        meta: { pathname },
+      });
+      sendJson(res, 403, { ok: false, error: "CSRF check failed" });
+      return;
+    }
+
     // session routes
     if (req.method === "GET" && pathname === "/api/me") {
       sendJson(res, 200, {
@@ -299,6 +340,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         data: {
           user: session.user,
           superAdmin: isSuperAdmin,
+          csrfToken: session.csrfToken || null,
           guilds: session.guilds.filter(userCanManageGuild).map((g) => ({
             ...g,
             role: getGuildRole(g),
@@ -669,8 +711,8 @@ async function requireSession(req: IncomingMessage, res: ServerResponse): Promis
     return null;
   }
 
-  const session = await getAdminSession(db, sessionId);
-  if (!session) {
+  const sessionDoc = await getAdminSession(db, sessionId);
+  if (!sessionDoc) {
     clearCookie(res, { name: config.cookieName, secure: config.cookieSecure });
     sendJson(res, 401, { ok: false, error: "Unauthorized" });
     return null;
@@ -678,11 +720,24 @@ async function requireSession(req: IncomingMessage, res: ServerResponse): Promis
 
   // Expire session by TTL (not just Discord token)
   const ttlMs = config.sessionTtlHours * 3600 * 1000;
-  if (Date.now() - new Date(session.updatedAt).getTime() > ttlMs) {
+  const lastSeenMs = new Date(sessionDoc.updatedAt).getTime();
+  if (Date.now() - lastSeenMs > ttlMs) {
     await deleteAdminSession(db, sessionId);
     clearCookie(res, { name: config.cookieName, secure: config.cookieSecure });
     sendJson(res, 401, { ok: false, error: "Session expired" });
     return null;
+  }
+
+  let session = sessionDoc;
+  if (!session.csrfToken) {
+    const now = new Date();
+    const csrfToken = crypto.randomUUID();
+    await setAdminSessionCsrfToken(db, sessionId, csrfToken, now);
+    session = { ...session, csrfToken, updatedAt: now };
+  } else if (Date.now() - lastSeenMs > 10 * 60 * 1000) {
+    const now = new Date();
+    await touchAdminSession(db, sessionId, now);
+    session = { ...session, updatedAt: now };
   }
 
   // Refresh Discord token if needed (best-effort)
@@ -872,4 +927,77 @@ function getClientIp(req: IncomingMessage): string | null {
     return first || null;
   }
   return req.socket.remoteAddress || null;
+}
+
+function setSecurityHeaders(res: ServerResponse): void {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+}
+
+function setCors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (!origin || typeof origin !== "string") return;
+  if (origin !== allowedOrigin) return;
+
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+
+  const existing = res.getHeader("Vary");
+  const existingValue = Array.isArray(existing)
+    ? existing.join(", ")
+    : typeof existing === "string"
+      ? existing
+      : "";
+  const next = existingValue ? `${existingValue}, Origin` : "Origin";
+  res.setHeader("Vary", next);
+}
+
+function isUnsafeMethod(method: string | undefined): boolean {
+  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+}
+
+function passesCsrf(req: IncomingMessage, session: AdminSession): boolean {
+  if (!isTrustedOrigin(req)) return false;
+  const expected = session.csrfToken;
+  if (!expected) return false;
+  const raw = req.headers["x-csrf-token"];
+  const provided = Array.isArray(raw) ? raw[0] : raw;
+  if (!provided || typeof provided !== "string") return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function isTrustedOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin === allowedOrigin) return true;
+
+  const referer = req.headers.referer;
+  if (typeof referer === "string" && referer.startsWith(allowedOrigin)) return true;
+
+  return false;
+}
+
+function createRateLimiter(params: {
+  windowMs: number;
+  maxRequests: number;
+}): { allow: (key: string) => boolean } {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+  return {
+    allow(key: string) {
+      const now = Date.now();
+      const existing = buckets.get(key);
+      if (!existing || now >= existing.resetAt) {
+        buckets.set(key, { count: 1, resetAt: now + params.windowMs });
+        return true;
+      }
+      existing.count += 1;
+      buckets.set(key, existing);
+      return existing.count <= params.maxRequests;
+    },
+  };
 }
