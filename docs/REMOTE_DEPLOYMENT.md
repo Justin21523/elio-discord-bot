@@ -254,6 +254,8 @@ DB_NAME=communiverse_bot
 # Admin Web（獨立 Web 介面）
 ADMIN_WEB_PORT=3030
 ADMIN_WEB_ORIGIN=https://your-admin-domain.example
+# super_admin allowlist（Discord userId；空白/逗號分隔）
+ADMIN_WEB_SUPER_ADMIN_USER_IDS=123456789012345678
 
 # Discord OAuth2（Admin Web 使用）
 DISCORD_OAUTH_CLIENT_ID=your_app_id

@@ -88,6 +88,14 @@ Sidebar 分區（建議）：
 
 ---
 
+## 安全機制（實作備註）
+
+- **CSRF**：所有 state-changing API（POST/DELETE/…）要求 `X-CSRF-Token`，token 由 `/api/me` 回傳（session 綁定），並檢查 `Origin/Referer` 必須符合 `ADMIN_WEB_ORIGIN`。
+- **Rate limit**：Admin Web 服務對 `/api/*`、`/auth/*` 做基本 IP-based 限流（避免暴力/濫用）。
+- **Critical 操作**：UI 需二次確認 + 輸入確認字串；後端僅允許 `super_admin`。
+
+---
+
 ## 功能對應（V1 覆蓋範圍）
 
 > 下面是「要能在 Web 操作」的清單與在 repo 的落點；實作順序會依 UI 分頁逐步補齊。
@@ -156,4 +164,3 @@ Sidebar 分區（建議）：
 - 對應：
   - metrics：`src/util/metrics.ts`、bot admin `/api/metrics`
   - logs：`logs/`（docker volume）或 bot admin 提供 tail/query endpoint（V1 先 tail）
-
