@@ -11,8 +11,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function main() {
-  const uri = process.env.MONGODB_URI || config.mongodb?.uri || 'mongodb://localhost:27017';
-  const dbName = process.env.DB_NAME || config.mongodb?.name || 'communiverse_bot';
+  const uri = process.env.MONGODB_URI || config.db?.uri || 'mongodb://localhost:27017';
+  const dbName = process.env.DB_NAME || config.db?.name || 'communiverse_bot';
 
   const client = new MongoClient(uri);
   await client.connect();

@@ -1,21 +1,32 @@
-# Dockerfile (for bot) # FROM node:20-alpine
-FROM node:20-slim
+# Dockerfile (for bot)
+
+FROM node:20-slim AS build
 
 WORKDIR /app
 
-# faster installs
+ENV NODE_ENV=development \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false
+
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi \
+  && npm cache clean --force
+
+COPY . .
+RUN npm run build
+
+FROM node:20-slim AS runtime
+
+WORKDIR /app
+
 ENV NODE_ENV=production \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false
 
-# Install app deps first (leverage Docker layer cache)
 COPY package*.json ./
-# Use npm ci when lockfile exists; otherwise fall back to npm install (no dev deps)
-RUN if [ -f package-lock.json ]; then npm ci --only=production; else npm install --omit=dev; fi \
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi \
   && npm cache clean --force
 
-# Copy source
-COPY . .
+COPY --from=build /app/dist ./dist
 
-# The app uses ESM and dotenv in config.js, so .env must be provided at runtime.
-CMD ["node","src/index.js"]
+CMD ["node","dist/src/index.js"]

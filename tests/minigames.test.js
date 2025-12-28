@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import GuessNumberGame from "../src/services/minigames/games/GuessNumberGame.js";
 import DiceRollGame from "../src/services/minigames/games/DiceRollGame.js";
+import { COOLDOWNS } from "../src/config/cooldowns.js";
+
+// Speed up tests by disabling per-action cooldowns.
+COOLDOWNS.guessMs = 0;
+COOLDOWNS.diceMs = 0;
 
 const mockChannel = () => {
   const messages = [];

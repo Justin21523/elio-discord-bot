@@ -16,7 +16,13 @@ async function main() {
     await connectMongo();
 
     // Read greetings data file
-    const file = path.resolve("data/greetings.json");
+    const candidates = [
+      path.resolve("data/greetings.json"),
+      // In Docker images the working directory is `/app`, and we commonly mount data at `/app/dist/data`.
+      path.resolve("dist/data/greetings.json"),
+    ];
+    const file = candidates.find((p) => fs.existsSync(p));
+    if (!file) throw new Error("Could not locate greetings.json (tried data/ and dist/data)");
     const raw = JSON.parse(fs.readFileSync(file, "utf-8"));
     const docs = Array.isArray(raw.greetings) ? raw.greetings : [];
 
