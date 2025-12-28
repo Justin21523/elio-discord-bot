@@ -12,6 +12,7 @@ import pathModule from "node:path";
 import { logger } from "../util/logger.js";
 import { ChannelType } from "discord.js";
 import type { Client } from "discord.js";
+import { withCollection } from "../db/mongo.js";
 
 type Json =
   | null
@@ -271,6 +272,55 @@ async function handleRequest(
     return;
   }
 
+  // Persona testbench (LLM)
+  if (req.method === "POST" && path === "/api/ai/persona/reply") {
+    const body = await readJson<{
+      personaName?: string;
+      message?: string;
+      history?: Array<{ role?: string; content?: string }>;
+      useRag?: boolean;
+      maxTokens?: number;
+      temperature?: number;
+      topP?: number;
+      topK?: number;
+    }>(req);
+
+    const personaName = String(body?.personaName || "").trim();
+    const message = String(body?.message || "").trim();
+    if (!personaName || !message) {
+      sendJson(res, 400, { ok: false, error: "personaName and message are required" });
+      return;
+    }
+
+    const persona = await withCollection("personas", (col) => col.findOne({ name: personaName }));
+    if (!persona) {
+      sendJson(res, 404, { ok: false, error: `Persona "${personaName}" not found` });
+      return;
+    }
+
+    const history = Array.isArray(body?.history)
+      ? body.history
+          .slice(-10)
+          .map((m) => ({
+            role: m?.role === "assistant" ? "assistant" : "user",
+            content: String(m?.content || "").slice(0, 2000),
+          }))
+          .filter((m) => m.content.trim().length > 0)
+      : [];
+
+    const llama = await import("../services/ai/adapters/llamaCppAdapter.js");
+    const result = await llama.generatePersonaReply(message, persona as any, history as any, {
+      useRag: body?.useRag !== false,
+      maxTokens: clampInt(body?.maxTokens, 1, 256, 80),
+      temperature: clampNumber(body?.temperature, 0, 2, 0.9),
+      topP: clampNumber(body?.topP, 0, 1, 0.95),
+      topK: clampInt(body?.topK, 0, 200, 50),
+    });
+
+    sendJson(res, 200, result as Json);
+    return;
+  }
+
   if (req.method === "GET" && path === "/") {
     sendHtml(res, 200, renderHomeHtml());
     return;
@@ -477,4 +527,16 @@ async function runNodeScript(params: {
 function truncate(value: string, maxLen: number): string {
   if (value.length <= maxLen) return value;
   return value.slice(0, maxLen) + "\n…(truncated)…\n";
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }

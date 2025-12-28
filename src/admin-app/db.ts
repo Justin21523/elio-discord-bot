@@ -31,6 +31,39 @@ export type ScheduleDoc = {
   updatedAt?: Date;
 };
 
+export type PersonaFields = {
+  name: string;
+  enabled?: boolean;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+  color?: number | null;
+  description?: string | null;
+  system_prompt?: string | null;
+  openers?: string[];
+  likes?: string[];
+  dislikes?: string[];
+  traits?: Record<string, number>;
+  personality?: string | null;
+  speaking_style?: string | null;
+};
+
+export type PersonaDoc = PersonaFields & {
+  _id?: ObjectId;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
+export type PersonaSummary = {
+  _id?: ObjectId;
+  name: string;
+  enabled?: boolean;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+  color?: number | null;
+  description?: string | null;
+  updatedAt?: Date;
+};
+
 export type AdminAuditLogRisk = "low" | "medium" | "high" | "critical";
 
 export type AdminAuditLogActor = {
@@ -130,6 +163,72 @@ export async function disableSchedule(db: Db, guildId: string, kind: string): Pr
   );
 }
 
+export async function listPersonas(
+  db: Db,
+  params: { q?: string; includeDisabled?: boolean; limit: number }
+): Promise<PersonaSummary[]> {
+  const query = (params.q || "").trim();
+  const includeDisabled = params.includeDisabled === true;
+
+  const filter: Filter<PersonaDoc> & Record<string, unknown> = {};
+  if (!includeDisabled) filter.enabled = { $ne: false };
+
+  if (query) {
+    const safe = escapeRegex(query);
+    filter.$or = [
+      { name: { $regex: safe, $options: "i" } },
+      { description: { $regex: safe, $options: "i" } },
+    ];
+  }
+
+  const projection = {
+    name: 1,
+    enabled: 1,
+    avatar: 1,
+    avatarUrl: 1,
+    color: 1,
+    description: 1,
+    updatedAt: 1,
+  };
+
+  return db
+    .collection<PersonaDoc>("personas")
+    .find(filter, { projection })
+    .sort({ name: 1 })
+    .limit(params.limit)
+    .toArray() as unknown as PersonaSummary[];
+}
+
+export async function getPersonaById(db: Db, id: string): Promise<PersonaDoc | null> {
+  try {
+    const oid = new ObjectId(id);
+    return await db.collection<PersonaDoc>("personas").findOne({ _id: oid });
+  } catch {
+    return null;
+  }
+}
+
+export async function getPersonaByName(db: Db, name: string): Promise<PersonaDoc | null> {
+  return await db.collection<PersonaDoc>("personas").findOne({ name });
+}
+
+export async function createPersona(
+  db: Db,
+  doc: Omit<PersonaDoc, "_id">
+): Promise<{ insertedId: ObjectId }> {
+  const result = await db.collection<PersonaDoc>("personas").insertOne(doc);
+  return { insertedId: result.insertedId };
+}
+
+export async function updatePersonaById(
+  db: Db,
+  id: string,
+  update: Partial<PersonaDoc>
+): Promise<void> {
+  const oid = new ObjectId(id);
+  await db.collection<PersonaDoc>("personas").updateOne({ _id: oid }, { $set: update });
+}
+
 export async function insertAuditLog(
   db: Db,
   log: Omit<AdminAuditLogDoc, "_id">
@@ -148,4 +247,8 @@ export async function listAuditLogs(
     .sort({ ts: -1 })
     .limit(limit)
     .toArray();
+}
+
+function escapeRegex(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

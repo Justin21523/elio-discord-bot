@@ -30,6 +30,11 @@ import {
   insertAuditLog,
   listAuditLogs,
   listSchedules,
+  listPersonas,
+  getPersonaById,
+  getPersonaByName,
+  createPersona,
+  updatePersonaById,
   setAdminSessionCsrfToken,
   touchAdminSession,
   upsertAdminSession,
@@ -39,6 +44,8 @@ import {
   type AdminSession,
   type AdminAuditLogDoc,
   type AdminAuditLogRisk,
+  type PersonaFields,
+  type PersonaDoc,
 } from "./db.js";
 import {
   clearCookie,
@@ -367,6 +374,174 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // Personas (catalog)
+    if (req.method === "GET" && pathname === "/api/personas") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const q = (url.searchParams.get("q") || "").trim();
+      const includeDisabled = url.searchParams.get("includeDisabled") === "true" && isSuperAdmin;
+      const limit = clampInt(url.searchParams.get("limit"), 1, 500, 200);
+
+      const rows = await listPersonas(db, { q, includeDisabled, limit });
+      sendJson(res, 200, {
+        ok: true,
+        data: rows.map((p) => ({
+          id: serializeId(p),
+          name: p.name,
+          enabled: p.enabled !== false,
+          avatar: p.avatar ?? null,
+          avatarUrl: p.avatarUrl ?? null,
+          color: typeof p.color === "number" ? p.color : null,
+          description: p.description ?? null,
+          updatedAt: p.updatedAt?.toISOString?.() ?? null,
+        })) as Json,
+      });
+      return;
+    }
+
+    const personaByIdMatch = pathname.match(/^\/api\/personas\/([^/]+)$/);
+    if (req.method === "GET" && personaByIdMatch) {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const id = decodeURIComponent(personaByIdMatch[1] || "");
+      const doc = await getPersonaById(db, id);
+      if (!doc) {
+        sendJson(res, 404, { ok: false, error: "Persona not found" });
+        return;
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        data: serializePersonaDoc(doc) as Json,
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/personas") {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "personas.create",
+          risk: "high",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const body = await readJson<Record<string, unknown>>(req);
+      const parsed = parsePersonaInput(body);
+      if (!parsed.ok) {
+        sendJson(res, 400, { ok: false, error: parsed.error });
+        return;
+      }
+
+      const name = parsed.data.name;
+      const existing = await getPersonaByName(db, name);
+      if (existing) {
+        sendJson(res, 409, { ok: false, error: `Persona "${name}" already exists` });
+        return;
+      }
+
+      const now = new Date();
+      const doc: Omit<PersonaDoc, "_id"> = {
+        ...parsed.data,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const result = await createPersona(db, doc);
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "personas.create",
+        risk: "high",
+        ok: true,
+        req,
+        meta: { personaId: result.insertedId.toHexString(), name },
+      });
+
+      sendJson(res, 200, { ok: true, data: { id: result.insertedId.toHexString() } as Json });
+      return;
+    }
+
+    if (req.method === "POST" && personaByIdMatch) {
+      if (!isSuperAdmin) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId: null,
+          action: "personas.update",
+          risk: "high",
+          ok: false,
+          req,
+          meta: { reason: "forbidden" },
+        });
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const id = decodeURIComponent(personaByIdMatch[1] || "");
+      const existing = await getPersonaById(db, id);
+      if (!existing) {
+        sendJson(res, 404, { ok: false, error: "Persona not found" });
+        return;
+      }
+
+      const body = await readJson<Record<string, unknown>>(req);
+      const parsed = parsePersonaInput(body);
+      if (!parsed.ok) {
+        sendJson(res, 400, { ok: false, error: parsed.error });
+        return;
+      }
+
+      if (parsed.data.name !== existing.name) {
+        const dupe = await getPersonaByName(db, parsed.data.name);
+        if (dupe && serializeId(dupe) !== id) {
+          sendJson(res, 409, { ok: false, error: `Persona "${parsed.data.name}" already exists` });
+          return;
+        }
+      }
+
+      const now = new Date();
+      const patch: Partial<PersonaDoc> = {
+        ...parsed.data,
+        updatedAt: now,
+      };
+
+      await updatePersonaById(db, id, patch);
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "personas.update",
+        risk: "high",
+        ok: true,
+        req,
+        meta: {
+          personaId: id,
+          name: parsed.data.name,
+          fields: Object.keys(parsed.data),
+          systemPromptLength: typeof parsed.data.system_prompt === "string" ? parsed.data.system_prompt.length : 0,
+        },
+      });
+
+      const updated = await getPersonaById(db, id);
+      sendJson(res, 200, { ok: true, data: updated ? (serializePersonaDoc(updated) as Json) : (serializePersonaDoc({ ...existing, ...patch } as PersonaDoc) as Json) });
+      return;
+    }
+
     // Audit log (read-only)
     if (req.method === "GET" && pathname === "/api/audit") {
       const limit = clampInt(url.searchParams.get("limit"), 1, 200, 100);
@@ -610,6 +785,42 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
       const out = await fetchBotAdminJson("/api/ai/llama/slots");
       sendJson(res, 200, out);
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/bot/ai/persona/reply") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+
+      const body = await readJson<Record<string, unknown>>(req);
+      const personaName = typeof body.personaName === "string" ? body.personaName : null;
+      const message = typeof body.message === "string" ? body.message : null;
+      const useRag = body.useRag !== false;
+
+      const out = await fetchBotAdminJson("/api/ai/persona/reply", {
+        method: "POST",
+        body: JSON.stringify({ ...body, ...(typeof useRag === "boolean" ? { useRag } : {}) }),
+        headers: { "Content-Type": "application/json" },
+      });
+
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "ai.personaReplyTest",
+        risk: "low",
+        ok: typeof out === "object" && out !== null ? Boolean((out as any).ok) : true,
+        req,
+        meta: {
+          personaName,
+          messageLen: typeof message === "string" ? message.length : null,
+        },
+      });
+
+      // Always return ok:true for the HTTP call; the inner {ok:false,error} is part of the testbench output.
+      sendJson(res, 200, { ok: true, data: out as Json });
       return;
     }
 
@@ -1094,4 +1305,102 @@ function createRateLimiter(params: {
       return existing.count <= params.maxRequests;
     },
   };
+}
+
+function serializePersonaDoc(doc: PersonaDoc): Record<string, unknown> {
+  return {
+    id: serializeId(doc),
+    name: String(doc.name || ""),
+    enabled: doc.enabled !== false,
+    avatar: typeof doc.avatar === "string" ? doc.avatar : null,
+    avatarUrl: typeof doc.avatarUrl === "string" ? doc.avatarUrl : null,
+    color: typeof doc.color === "number" ? doc.color : null,
+    description: typeof doc.description === "string" ? doc.description : null,
+    system_prompt: typeof doc.system_prompt === "string" ? doc.system_prompt : null,
+    openers: Array.isArray(doc.openers) ? doc.openers.map((x) => String(x)) : [],
+    likes: Array.isArray(doc.likes) ? doc.likes.map((x) => String(x)) : [],
+    dislikes: Array.isArray(doc.dislikes) ? doc.dislikes.map((x) => String(x)) : [],
+    traits: doc.traits && typeof doc.traits === "object" ? doc.traits : {},
+    personality: typeof doc.personality === "string" ? doc.personality : null,
+    speaking_style: typeof doc.speaking_style === "string" ? doc.speaking_style : null,
+    createdAt: doc.createdAt instanceof Date ? doc.createdAt.toISOString() : null,
+    updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt.toISOString() : null,
+  };
+}
+
+function parsePersonaInput(
+  body: Record<string, unknown>
+): { ok: true; data: PersonaFields } | { ok: false; error: string } {
+  const name = String(body.name || "").trim();
+  if (!name) return { ok: false, error: "name is required" };
+  if (name.length > 64) return { ok: false, error: "name is too long" };
+
+  const enabled = body.enabled !== false;
+
+  const avatar = typeof body.avatar === "string" ? body.avatar.trim() : "";
+  const avatarUrl = typeof body.avatarUrl === "string" ? body.avatarUrl.trim() : "";
+
+  const color = body.color === null || typeof body.color === "undefined"
+    ? null
+    : typeof body.color === "number"
+      ? body.color
+      : Number.parseInt(String(body.color), 10);
+
+  if (typeof color === "number" && !Number.isFinite(color)) {
+    return { ok: false, error: "color must be a number" };
+  }
+
+  const description = typeof body.description === "string" ? body.description : null;
+  const system_prompt = typeof body.system_prompt === "string" ? body.system_prompt : null;
+  const personality = typeof body.personality === "string" ? body.personality : null;
+  const speaking_style = typeof body.speaking_style === "string" ? body.speaking_style : null;
+
+  const openers = coerceStringArray(body.openers);
+  const likes = coerceStringArray(body.likes);
+  const dislikes = coerceStringArray(body.dislikes);
+
+  const traits = coerceNumberMap(body.traits);
+
+  return {
+    ok: true,
+    data: {
+      name,
+      enabled,
+      ...(avatar ? { avatar } : { avatar: null }),
+      ...(avatarUrl ? { avatarUrl } : { avatarUrl: null }),
+      ...(typeof color === "number" ? { color } : { color: null }),
+      ...(description ? { description } : { description: null }),
+      ...(system_prompt ? { system_prompt } : { system_prompt: null }),
+      openers,
+      likes,
+      dislikes,
+      traits,
+      ...(personality ? { personality } : { personality: null }),
+      ...(speaking_style ? { speaking_style } : { speaking_style: null }),
+    },
+  };
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((x) => String(x)).map((x) => x.trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function coerceNumberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const n = typeof v === "number" ? v : Number.parseFloat(String(v));
+    if (!Number.isFinite(n)) continue;
+    out[k] = n;
+  }
+  return out;
 }
