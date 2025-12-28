@@ -55,9 +55,15 @@ services:
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=2048
 
+      # Bot internal admin API (runtime bridge for external dashboard)
+      BOT_ADMIN_ENABLED: ${BOT_ADMIN_ENABLED:-false}
+      BOT_ADMIN_HOST: 0.0.0.0
+      BOT_ADMIN_PORT: ${BOT_ADMIN_PORT:-3001}
+      BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
+
     volumes:
       - ./logs:/app/logs
-      - ./data:/app/data:ro
+      - ./data:/app/dist/data:ro
     networks:
       - elioverse-network
     deploy:
@@ -80,6 +86,45 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
+
+  # -------------------------
+  # Admin Web (Discord OAuth + Dashboard)
+  # -------------------------
+  admin-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      bot:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      # MongoDB
+      MONGODB_URI: mongodb://dev:devpass@mongo:27017/?authSource=admin
+      DB_NAME: ${DB_NAME:-communiverse_bot}
+
+      # Admin web server
+      ADMIN_WEB_HOST: 0.0.0.0
+      ADMIN_WEB_PORT: ${ADMIN_WEB_PORT:-3030}
+      ADMIN_WEB_ORIGIN: ${ADMIN_WEB_ORIGIN:-http://localhost:3030}
+
+      # Discord OAuth2
+      DISCORD_OAUTH_CLIENT_ID: ${DISCORD_OAUTH_CLIENT_ID:-}
+      DISCORD_OAUTH_CLIENT_SECRET: ${DISCORD_OAUTH_CLIENT_SECRET:-}
+      DISCORD_OAUTH_REDIRECT_URI: ${DISCORD_OAUTH_REDIRECT_URI:-http://localhost:3030/auth/discord/callback}
+
+      # Bot runtime bridge (internal network)
+      BOT_ADMIN_URL: ${BOT_ADMIN_URL:-http://bot:3001}
+      BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN:-}
+
+    ports:
+      - "${ADMIN_WEB_PORT:-3030}:${ADMIN_WEB_PORT:-3030}"
+    networks:
+      - elioverse-network
 
   # -------------------------
   # CPU-only AI Service for traditional ML (BM25, N-gram, SVM, Naive Bayes)

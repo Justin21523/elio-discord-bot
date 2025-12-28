@@ -100,18 +100,23 @@ docker compose logs -f
 # 3) Wait for AI service readiness
 docker compose logs -f ai-service | grep "Application startup complete"
 
+# (Optional) Admin dashboard (Discord OAuth)
+# - Set `DISCORD_OAUTH_CLIENT_SECRET` + redirect URL in Discord portal
+# - Enable bot runtime bridge: `BOT_ADMIN_ENABLED=true` (and set `BOT_ADMIN_TOKEN`)
+# - Then open: http://localhost:3030
+
 # 4) Ensure MongoDB indexes
-docker compose exec bot node src/db/ensure-indexes.js
+docker compose exec bot npm run ensure-indexes
 
 # 5) Ingest RAG resources + smoke test
-docker compose exec bot node scripts/ingest-rag.js
-docker compose exec bot node scripts/rag-smoketest.js
+docker compose exec bot npm run ingest:rag
+docker compose exec bot npm run test:rag
 
 # 6) Seed personas/scenarios/greetings/etc.
-docker compose exec bot node scripts/seed-all-local.js
+docker compose exec bot npm run seed:all
 
 # 7) Deploy slash commands (includes /game)
-docker compose exec bot node scripts/deploy-commands.js
+docker compose exec bot npm run deploy-commands
 ```
 
 **Profile switch (optional):**
