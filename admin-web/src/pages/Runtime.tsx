@@ -1,11 +1,19 @@
 import React, { useMemo, useState } from "react";
 
+import { Alert, Button, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
+import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
+
 import { apiPost } from "../api";
+import { setAuditPrefill } from "../util/auditPrefill";
+import { useToast } from "../AppProviders";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { Card, EmptyState, ErrorBanner, PageHeader } from "../components/ui";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 import type { MeResponse } from "../types";
 
-export function RuntimePage(props: { me: MeResponse; selectedGuildId: string }) {
+export function RuntimePage(props: { me: MeResponse; selectedGuildId: string; navigate: (to: string) => void }) {
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [output, setOutput] = useState<string>("");
@@ -28,9 +36,16 @@ export function RuntimePage(props: { me: MeResponse; selectedGuildId: string }) 
     setOutput("");
     try {
       await apiPost("/api/bot/runtime/restart", {});
-      setOutput("Restart triggered. The bot may disconnect briefly while the container restarts.");
+      const msg = "Restart triggered. The bot may disconnect briefly while the container restarts.";
+      setOutput(msg);
+      toast.undoable(msg, "View audit", () => {
+        setAuditPrefill({ action: "runtime.restart" });
+        props.navigate("/audit");
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
       setConfirm(null);
@@ -42,14 +57,18 @@ export function RuntimePage(props: { me: MeResponse; selectedGuildId: string }) 
     setBusy(true);
     setOutput("");
     try {
-      const body =
-        scope === "guild"
-          ? { scope, guildId: props.selectedGuildId }
-          : { scope };
+      const body = scope === "guild" ? { scope, guildId: props.selectedGuildId } : { scope };
       const result = await apiPost<any>("/api/bot/discord/deploy-commands", body);
-      setOutput(JSON.stringify(result, null, 2));
+      const text = JSON.stringify(result, null, 2);
+      setOutput(text);
+      toast.undoable("Slash commands deployed.", "View audit", () => {
+        setAuditPrefill({ action: "discord.deployCommands" });
+        props.navigate("/audit");
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(msg);
     } finally {
       setBusy(false);
       setConfirm(null);
@@ -57,74 +76,95 @@ export function RuntimePage(props: { me: MeResponse; selectedGuildId: string }) 
   }
 
   return (
-    <div className="page">
+    <Stack spacing={2.5}>
       <PageHeader
         title="Runtime"
+        scope="global"
         subtitle="Critical operations: restart bot, deploy slash commands"
       />
 
-      {error ? <ErrorBanner message={error} /> : null}
+      {error ? <Alert severity="error">{error}</Alert> : null}
 
       {!canUse ? (
-        <Card>
-          <EmptyState
-            title="Forbidden"
-            detail="This page requires super_admin access (ADMIN_WEB_SUPER_ADMIN_USER_IDS)."
-          />
-        </Card>
+        <EmptyState title="Forbidden" detail="This page requires super_admin access (ADMIN_WEB_SUPER_ADMIN_USER_IDS)." />
       ) : (
         <>
-          <div className="grid2">
-            <Card title="Restart">
-              <div className="muted">
-                This sends a SIGTERM to the bot process. Docker should restart the container.
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <button
-                  className="button danger"
-                  type="button"
-                  onClick={() => setConfirm({ kind: "restart" })}
-                  disabled={busy}
-                >
-                  Restart bot
-                </button>
-              </div>
-            </Card>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent>
+                  <Stack spacing={1.25}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 950 }}>
+                      Restart
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      This sends a SIGTERM to the bot process. Docker should restart the container.
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      color="error"
+                      startIcon={<RestartAltRoundedIcon />}
+                      onClick={() => setConfirm({ kind: "restart" })}
+                      disabled={busy}
+                      sx={{ alignSelf: "flex-start" }}
+                    >
+                      Restart bot
+                    </Button>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
 
-            <Card title="Deploy Slash Commands">
-              <div className="muted">
-                Selected guild: <span className="monospace">{selectedHint}</span>
-              </div>
-              <div style={{ marginTop: 10 }} className="rowGap">
-                <button
-                  className="button primary"
-                  type="button"
-                  onClick={() => setConfirm({ kind: "deploy", scope: "guild" })}
-                  disabled={busy || !props.selectedGuildId}
-                  title={!props.selectedGuildId ? "Select a guild first" : undefined}
-                >
-                  Deploy to selected guild
-                </button>
-                <button
-                  className="button danger"
-                  type="button"
-                  onClick={() => setConfirm({ kind: "deploy", scope: "global" })}
-                  disabled={busy}
-                >
-                  Deploy globally
-                </button>
-              </div>
-              <div className="muted" style={{ marginTop: 10 }}>
-                Global commands can take ~1 hour to propagate.
-              </div>
-            </Card>
-          </div>
+            <Grid item xs={12} md={6}>
+              <Card>
+                <CardContent>
+                  <Stack spacing={1.25}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 950 }}>
+                      Deploy Slash Commands
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Selected guild: <span style={{ fontFamily: "monospace" }}>{selectedHint}</span>
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
+                      <Button
+                        variant="contained"
+                        startIcon={<PlayArrowRoundedIcon />}
+                        onClick={() => setConfirm({ kind: "deploy", scope: "guild" })}
+                        disabled={busy || !props.selectedGuildId}
+                      >
+                        Deploy to selected guild
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        startIcon={<PlayArrowRoundedIcon />}
+                        onClick={() => setConfirm({ kind: "deploy", scope: "global" })}
+                        disabled={busy}
+                      >
+                        Deploy globally
+                      </Button>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">
+                      Global commands can take ~1 hour to propagate across Discord.
+                    </Typography>
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
 
-          <div style={{ marginTop: 12 }}>
-            <Card title="Output">
-              <pre className="pre">{output || "—"}</pre>
-            </Card>
-          </div>
+          <Card>
+            <CardContent>
+              <Stack spacing={1}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 950 }}>
+                  Output
+                </Typography>
+                <pre style={{ margin: 0, padding: 12, borderRadius: 12, overflow: "auto", background: "rgba(2,6,23,0.9)", color: "#e8eefc", fontSize: 12 }}>
+                  {output || "—"}
+                </pre>
+              </Stack>
+            </CardContent>
+          </Card>
         </>
       )}
 
@@ -163,7 +203,7 @@ export function RuntimePage(props: { me: MeResponse; selectedGuildId: string }) 
         onCancel={() => setConfirm(null)}
         onConfirm={() => doDeploy("global")}
       />
-    </div>
+    </Stack>
   );
 }
 

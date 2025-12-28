@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+
+import { Box, CircularProgress } from "@mui/material";
 
 import { apiGet, apiPost, setCsrfToken } from "./api";
 import { AppShell } from "./components/AppShell";
@@ -9,13 +11,14 @@ import { SchedulesPage } from "./pages/Schedules";
 import { JobsPage } from "./pages/Jobs";
 import { LlmPage } from "./pages/Llm";
 import { AuditPage } from "./pages/Audit";
-import { MetricsPage } from "./pages/Metrics";
 import { RuntimePage } from "./pages/Runtime";
-import { PersonasPage } from "./pages/Personas";
-import { RagPage } from "./pages/Rag";
 import { PlaceholderPage } from "./pages/Placeholder";
 import { normalizePathname } from "./router";
 import type { MeResponse } from "./types";
+
+const LazyMetricsPage = React.lazy(async () => ({ default: (await import("./pages/Metrics")).MetricsPage }));
+const LazyPersonasPage = React.lazy(async () => ({ default: (await import("./pages/Personas")).PersonasPage }));
+const LazyRagPage = React.lazy(async () => ({ default: (await import("./pages/Rag")).RagPage }));
 
 export default function App() {
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -101,15 +104,15 @@ export default function App() {
       case "/llm":
         return <LlmPage />;
       case "/metrics":
-        return <MetricsPage />;
+        return <LazyMetricsPage />;
       case "/audit":
         return <AuditPage me={me} selectedGuildId={selectedGuildId} />;
       case "/runtime":
-        return <RuntimePage me={me} selectedGuildId={selectedGuildId} />;
+        return <RuntimePage me={me} selectedGuildId={selectedGuildId} navigate={navigate} />;
       case "/personas":
-        return <PersonasPage me={me} selectedGuildId={selectedGuildId} />;
+        return <LazyPersonasPage me={me} selectedGuildId={selectedGuildId} navigate={navigate} />;
       case "/rag":
-        return <RagPage me={me} selectedGuildId={selectedGuildId} />;
+        return <LazyRagPage me={me} selectedGuildId={selectedGuildId} navigate={navigate} />;
       case "/economy":
         return (
           <PlaceholderPage title="Economy / Games" detail="Next: points, leaderboard, achievements, and minigame settings." />
@@ -123,7 +126,13 @@ export default function App() {
     }
   }, [me, navigate, pathname, selectedGuildId, setSelectedGuildId]);
 
-  if (loading) return <div className="boot">Loading…</div>;
+  if (loading) {
+    return (
+      <Box sx={{ height: "100vh", display: "grid", placeItems: "center", bgcolor: "background.default" }}>
+        <CircularProgress size={26} />
+      </Box>
+    );
+  }
   if (!me) return <LoginPage />;
 
   return (
@@ -138,7 +147,15 @@ export default function App() {
       setSidebarCollapsed={setSidebarCollapsed}
       onLogout={onLogout}
     >
-      {page}
+      <Suspense
+        fallback={
+          <Box sx={{ display: "grid", placeItems: "center", py: 10 }}>
+            <CircularProgress size={26} />
+          </Box>
+        }
+      >
+        {page}
+      </Suspense>
     </AppShell>
   );
 }

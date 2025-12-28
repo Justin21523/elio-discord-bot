@@ -1,14 +1,15 @@
 import React from "react";
-import { Card, EmptyState, PageHeader } from "../components/ui";
+
+import { Stack } from "@mui/material";
+
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
 
 export function PlaceholderPage(props: { title: string; detail?: string }) {
   return (
-    <div className="page">
+    <Stack spacing={2.5}>
       <PageHeader title={props.title} subtitle="Coming soon" />
-      <Card>
-        <EmptyState title="Not implemented yet" detail={props.detail} />
-      </Card>
-    </div>
+      <EmptyState title="Not implemented yet" detail={props.detail} />
+    </Stack>
   );
 }
-

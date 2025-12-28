@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Communiverse Bot Admin</title>
+    <script>
+      (() => {
+        try {
+          const mode = localStorage.getItem("mui-mode") || "system";
+          const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+          const resolved = mode === "system" ? (prefersDark ? "dark" : "light") : mode;
+          document.documentElement.setAttribute("data-mui-color-scheme", resolved);
+        } catch {
+          // ignore
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

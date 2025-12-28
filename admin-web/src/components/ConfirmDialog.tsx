@@ -1,5 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
+
 type Props = {
   open: boolean;
   title: string;
@@ -25,46 +36,51 @@ export function ConfirmDialog(props: Props) {
     return value.trim() === props.phrase;
   }, [props.busy, props.phrase, value]);
 
-  if (!props.open) return null;
-
   return (
-    <div className="modalOverlay" role="presentation" onMouseDown={props.onCancel}>
-      <div className="modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modalHeader">
-          <div className="modalTitle">{props.title}</div>
-        </div>
+    <Dialog
+      open={props.open}
+      onClose={props.busy ? undefined : props.onCancel}
+      fullWidth
+      maxWidth="sm"
+      aria-labelledby="confirm-dialog-title"
+    >
+      <DialogTitle id="confirm-dialog-title" sx={{ fontWeight: 950 }}>
+        {props.title}
+      </DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 0.5 }}>
+          {props.description ? (
+            <Typography variant="body2" color="text.secondary">
+              {props.description}
+            </Typography>
+          ) : null}
 
-        {props.description ? <div className="modalDescription">{props.description}</div> : null}
-
-        {props.phrase ? (
-          <label className="modalField">
-            <div className="modalFieldLabel">
-              Type <code>{props.phrase}</code> to confirm
-            </div>
-            <input
+          {props.phrase ? (
+            <TextField
+              label={`Type ${props.phrase} to confirm`}
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder={props.phrase}
               autoFocus
+              fullWidth
+              disabled={props.busy}
             />
-          </label>
-        ) : null}
-
-        <div className="modalActions">
-          <button className="button" type="button" onClick={props.onCancel} disabled={props.busy}>
-            Cancel
-          </button>
-          <button
-            className={props.confirmTone === "danger" ? "button danger" : "button primary"}
-            type="button"
-            onClick={props.onConfirm}
-            disabled={!canConfirm}
-          >
-            {props.busy ? "Working…" : props.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+          ) : null}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={props.onCancel} disabled={props.busy}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          color={props.confirmTone === "danger" ? "error" : "primary"}
+          onClick={props.onConfirm}
+          disabled={!canConfirm}
+        >
+          {props.busy ? "Working…" : props.confirmLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
-
