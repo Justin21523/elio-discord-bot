@@ -155,6 +155,24 @@ class Settings(BaseSettings):
     WEB_SEARCH_TIMEOUT: int = Field(default=10, env="WEB_SEARCH_TIMEOUT")  # type: ignore
     BRAVE_API_KEY: Optional[str] = Field(default=None, env="BRAVE_API_KEY")  # type: ignore
 
+    # ===== Art Platform APIs =====
+    # DeviantArt OAuth 2.0 (https://www.deviantart.com/developers/)
+    DEVIANTART_CLIENT_ID: Optional[str] = Field(default=None, env="DEVIANTART_CLIENT_ID")  # type: ignore
+    DEVIANTART_CLIENT_SECRET: Optional[str] = Field(default=None, env="DEVIANTART_CLIENT_SECRET")  # type: ignore
+
+    # Tumblr API (https://www.tumblr.com/oauth/apps)
+    TUMBLR_API_KEY: Optional[str] = Field(default=None, env="TUMBLR_API_KEY")  # type: ignore
+    TUMBLR_API_SECRET: Optional[str] = Field(default=None, env="TUMBLR_API_SECRET")  # type: ignore
+
+    # Art search configuration
+    ART_SEARCH_ENABLED: bool = Field(default=True, env="ART_SEARCH_ENABLED")  # type: ignore
+    ART_NSFW_FILTER: bool = Field(default=True, env="ART_NSFW_FILTER")  # type: ignore
+    ART_MAX_RESULTS_PER_PLATFORM: int = Field(default=10, env="ART_MAX_RESULTS_PER_PLATFORM")  # type: ignore
+
+    # Content Discovery
+    CONTENT_DISCOVERY_MAX_RESULTS: int = Field(default=20, env="CONTENT_DISCOVERY_MAX_RESULTS")  # type: ignore
+    CONTENT_DISCOVERY_TIMEOUT_SECONDS: int = Field(default=30, env="CONTENT_DISCOVERY_TIMEOUT_SECONDS")  # type: ignore
+
     # >>> pydantic v2 settings config <<<
     model_config = SettingsConfigDict(
         env_file=".env",

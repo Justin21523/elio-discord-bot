@@ -342,6 +342,8 @@ class AgentOrchestrator:
                 result = await self._persona_compose(params)
             elif kind == "rag_query":
                 result = await self._rag_query(params)
+            elif kind == "content_discovery":
+                result = await self._content_discovery(params)
             elif kind == "custom":
                 # General agent execution
                 query = params.get("query", "")
@@ -446,6 +448,119 @@ class AgentOrchestrator:
         agent_result = await self.agent.run(query=query, context=context)
 
         return agent_result.to_dict()
+
+    async def _content_discovery(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Multi-platform content discovery with LLM scoring and diversity ranking
+
+        Args:
+            params: Dictionary with:
+                - query (str): Search query
+                - platforms (List[str], optional): Platforms to search
+                - max_results (int, optional): Maximum results
+                - content_types (List[str], optional): Desired content types
+
+        Returns:
+            Dict with discovery results, diversity score, and platform coverage
+        """
+        from app.services.agent.content_discovery import ContentDiscoveryOrchestrator
+        from app.services.art.deviantart_client import DeviantArtClient
+        from app.services.art.tumblr_client import TumblrClient
+        from app.config import settings
+
+        query = params.get("query", "")
+        platforms = params.get("platforms")
+        max_results = params.get("max_results", settings.CONTENT_DISCOVERY_MAX_RESULTS)
+        content_types = params.get("content_types")
+
+        log_info("Content discovery started", query=query, platforms=platforms)
+
+        # Initialize art platform clients if credentials available
+        deviantart_client = None
+        tumblr_client = None
+
+        if settings.DEVIANTART_CLIENT_ID and settings.DEVIANTART_CLIENT_SECRET:
+            deviantart_client = DeviantArtClient(
+                client_id=settings.DEVIANTART_CLIENT_ID,
+                client_secret=settings.DEVIANTART_CLIENT_SECRET
+            )
+            await deviantart_client.authenticate()
+
+        if settings.TUMBLR_API_KEY:
+            tumblr_client = TumblrClient(api_key=settings.TUMBLR_API_KEY)
+
+        # Web search function wrapper (uses existing web search tool)
+        async def web_search_wrapper(query: str, max_results: int, domains=None, recency_days=None):
+            """Wrapper for web search tool"""
+            from app.services.agent.tools import tool_registry
+
+            tools = tool_registry.get_tools(["web_search"])
+            web_search_tool = tools.get("web_search")
+
+            if web_search_tool:
+                func = web_search_tool.get("function")
+                if func:
+                    search_params = {"query": query, "max_results": max_results}
+                    if domains:
+                        search_params["domains"] = domains
+                    if recency_days:
+                        search_params["recency_days"] = recency_days
+
+                    result = await func(**search_params)
+                    return result if isinstance(result, list) else []
+
+            return []
+
+        # Create orchestrator
+        orchestrator = ContentDiscoveryOrchestrator(
+            deviantart_client=deviantart_client,
+            tumblr_client=tumblr_client,
+            web_search_func=web_search_wrapper,
+            llm_service=llm_service
+        )
+
+        # Execute discovery
+        try:
+            discovery_result = await orchestrator.discover(
+                query=query,
+                platforms=platforms,
+                max_results=max_results,
+                content_types=content_types
+            )
+
+            log_info(
+                "Content discovery completed",
+                query=query,
+                total_results=discovery_result["total_results"],
+                diversity_score=discovery_result["diversity_score"]
+            )
+
+            return {
+                "success": True,
+                "query": discovery_result["query"],
+                "results": discovery_result["results"],
+                "total_results": discovery_result["total_results"],
+                "diversity_score": discovery_result["diversity_score"],
+                "platforms_covered": discovery_result["platforms_covered"]
+            }
+
+        except Exception as e:
+            log_error("Content discovery failed", query=query, error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "query": query,
+                "results": [],
+                "total_results": 0,
+                "diversity_score": 0.0,
+                "platforms_covered": []
+            }
+        finally:
+            # Clean up clients
+            if deviantart_client:
+                await deviantart_client.close()
+            if tumblr_client:
+                await tumblr_client.close()
 
 
 # Global agent instance
