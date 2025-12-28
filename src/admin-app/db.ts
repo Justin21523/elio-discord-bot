@@ -5,7 +5,7 @@
  */
 
 import { MongoClient, ObjectId } from "mongodb";
-import type { Db } from "mongodb";
+import type { Db, Filter } from "mongodb";
 import type { DiscordGuild, DiscordUser } from "./discord.js";
 
 export type AdminSession = {
@@ -28,6 +28,29 @@ export type ScheduleDoc = {
   enabled: boolean;
   createdAt?: Date;
   updatedAt?: Date;
+};
+
+export type AdminAuditLogRisk = "low" | "medium" | "high" | "critical";
+
+export type AdminAuditLogActor = {
+  userId: string;
+  username: string;
+  discriminator: string;
+  globalName?: string | null;
+};
+
+export type AdminAuditLogDoc = {
+  _id?: ObjectId;
+  ts: Date;
+  requestId: string;
+  actor: AdminAuditLogActor;
+  guildId: string | null;
+  action: string;
+  risk: AdminAuditLogRisk;
+  ok: boolean;
+  ip: string | null;
+  userAgent: string | null;
+  meta: Record<string, unknown> | null;
 };
 
 export async function connectAdminDb(params: {
@@ -89,3 +112,22 @@ export async function disableSchedule(db: Db, guildId: string, kind: string): Pr
   );
 }
 
+export async function insertAuditLog(
+  db: Db,
+  log: Omit<AdminAuditLogDoc, "_id">
+): Promise<void> {
+  await db.collection<AdminAuditLogDoc>("admin_audit_logs").insertOne(log);
+}
+
+export async function listAuditLogs(
+  db: Db,
+  filter: Filter<AdminAuditLogDoc>,
+  limit: number
+): Promise<AdminAuditLogDoc[]> {
+  return db
+    .collection<AdminAuditLogDoc>("admin_audit_logs")
+    .find(filter)
+    .sort({ ts: -1 })
+    .limit(limit)
+    .toArray();
+}

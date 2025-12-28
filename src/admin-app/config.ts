@@ -34,6 +34,8 @@ export type AdminAppConfig = {
   cookieSecure: boolean;
   sessionTtlHours: number;
 
+  superAdminUserIds: string[];
+
   discord: {
     clientId: string;
     clientSecret: string;
@@ -60,6 +62,11 @@ export function loadAdminAppConfig(): AdminAppConfig {
   const cookieSecure =
     process.env.ADMIN_WEB_COOKIE_SECURE === "true" || webOrigin.startsWith("https://");
   const sessionTtlHours = optionalInt("ADMIN_WEB_SESSION_TTL_HOURS", 12);
+
+  const superAdminUserIds = (process.env.ADMIN_WEB_SUPER_ADMIN_USER_IDS || "")
+    .split(/[,\s]+/)
+    .map((v) => v.trim())
+    .filter(Boolean);
 
   const clientId = (process.env.DISCORD_OAUTH_CLIENT_ID || process.env.APP_ID || "").trim();
   const clientSecret = (process.env.DISCORD_OAUTH_CLIENT_SECRET || "").trim();
@@ -95,6 +102,7 @@ export function loadAdminAppConfig(): AdminAppConfig {
     cookieName,
     cookieSecure,
     sessionTtlHours,
+    superAdminUserIds,
     discord,
     ...(botAdminUrl
       ? {

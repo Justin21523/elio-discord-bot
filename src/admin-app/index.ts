@@ -11,6 +11,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs/promises";
 
+import type { Filter } from "mongodb";
+
 import { loadAdminAppConfig } from "./config.js";
 import {
   buildDiscordAuthorizeUrl,
@@ -25,12 +27,16 @@ import {
   connectAdminDb,
   deleteAdminSession,
   getAdminSession,
+  insertAuditLog,
+  listAuditLogs,
   listSchedules,
   upsertAdminSession,
   upsertSchedule,
   disableSchedule,
   serializeId,
   type AdminSession,
+  type AdminAuditLogDoc,
+  type AdminAuditLogRisk,
 } from "./db.js";
 import {
   clearCookie,
@@ -80,6 +86,9 @@ async function shutdown(signal: string) {
 }
 
 async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const requestId = crypto.randomUUID();
+  res.setHeader("X-Request-Id", requestId);
+
   const url = new URL(req.url || "/", `http://${config.host}:${config.port}`);
   const pathname = url.pathname;
 
@@ -239,6 +248,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
       await upsertAdminSession(db, session);
 
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "auth.login",
+        risk: "low",
+        ok: true,
+        req,
+        meta: {
+          guildCount: session.guilds.length,
+          manageableGuildCount: session.guilds.filter(userCanManageGuild).length,
+        },
+      });
+
       // Clear one-time cookies and set session cookie
       clearCookie(res, { name: "admin_oauth_state", secure: config.cookieSecure });
       clearCookie(res, { name: "admin_return_to", secure: config.cookieSecure });
@@ -266,13 +289,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const session = await requireSession(req, res);
     if (!session) return;
 
+    const isSuperAdmin = isSuperAdminUser(session.user.id);
+    const manageableGuildIds = session.guilds.filter(userCanManageGuild).map((g) => g.id);
+
     // session routes
     if (req.method === "GET" && pathname === "/api/me") {
       sendJson(res, 200, {
         ok: true,
         data: {
           user: session.user,
-          guilds: session.guilds.filter(userCanManageGuild),
+          superAdmin: isSuperAdmin,
+          guilds: session.guilds.filter(userCanManageGuild).map((g) => ({
+            ...g,
+            role: getGuildRole(g),
+          })),
         },
       });
       return;
@@ -281,7 +311,78 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (req.method === "POST" && pathname === "/api/logout") {
       await deleteAdminSession(db, session._id);
       clearCookie(res, { name: config.cookieName, secure: config.cookieSecure });
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId: null,
+        action: "auth.logout",
+        risk: "low",
+        ok: true,
+        req,
+        meta: null,
+      });
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    // Audit log (read-only)
+    if (req.method === "GET" && pathname === "/api/audit") {
+      const limit = clampInt(url.searchParams.get("limit"), 1, 200, 100);
+      const guildId = (url.searchParams.get("guildId") || "").trim();
+      const actorUserId = (url.searchParams.get("actorUserId") || "").trim();
+      const action = (url.searchParams.get("action") || "").trim();
+      const risk = (url.searchParams.get("risk") || "").trim().toLowerCase();
+      const okParam = (url.searchParams.get("ok") || "").trim().toLowerCase();
+      const before = (url.searchParams.get("before") || "").trim();
+
+      const filter: Filter<AdminAuditLogDoc> & Record<string, unknown> = {};
+
+      if (action) filter.action = action;
+      if (actorUserId) filter["actor.userId"] = actorUserId;
+      if (okParam === "true") filter.ok = true;
+      if (okParam === "false") filter.ok = false;
+      if (risk && isAuditRisk(risk)) filter.risk = risk;
+
+      if (before) {
+        const beforeDate = new Date(before);
+        if (Number.isNaN(beforeDate.getTime())) {
+          sendJson(res, 400, { ok: false, error: "Invalid before (expected ISO date)" });
+          return;
+        }
+        filter.ts = { ...(filter.ts || {}), $lt: beforeDate };
+      }
+
+      if (guildId) {
+        if (!isSnowflake(guildId)) {
+          sendJson(res, 400, { ok: false, error: "Invalid guildId" });
+          return;
+        }
+        if (!isSuperAdmin && !canManageGuild(session.guilds, guildId)) {
+          sendJson(res, 403, { ok: false, error: "Forbidden" });
+          return;
+        }
+        filter.guildId = guildId;
+      } else if (!isSuperAdmin) {
+        filter.guildId = { $in: [...manageableGuildIds, null] };
+      }
+
+      const logs = await listAuditLogs(db, filter, limit);
+      sendJson(res, 200, {
+        ok: true,
+        data: logs.map((row) => ({
+          id: serializeId(row),
+          ts: row.ts.toISOString(),
+          requestId: row.requestId,
+          actor: row.actor,
+          guildId: row.guildId,
+          action: row.action,
+          risk: row.risk,
+          ok: row.ok,
+          ip: row.ip,
+          userAgent: row.userAgent,
+          meta: row.meta,
+        })) as Json,
+      });
       return;
     }
 
@@ -293,12 +394,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         sendJson(res, 400, { ok: false, error: "Invalid guildId" });
         return;
       }
-      if (!canManageGuild(session.guilds, guildId)) {
-        sendJson(res, 403, { ok: false, error: "Forbidden" });
-        return;
-      }
 
       if (req.method === "GET") {
+        if (!canManageGuild(session.guilds, guildId)) {
+          sendJson(res, 403, { ok: false, error: "Forbidden" });
+          return;
+        }
         const rows = await listSchedules(db, guildId);
         const data = rows.map((r) => ({
           id: serializeId(r),
@@ -315,6 +416,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
 
       if (req.method === "POST") {
+        if (!canManageGuild(session.guilds, guildId)) {
+          void writeAuditLog({
+            requestId,
+            actor: toAuditActor(session.user),
+            guildId,
+            action: "schedules.upsert",
+            risk: "medium",
+            ok: false,
+            req,
+            meta: { reason: "forbidden" },
+          });
+          sendJson(res, 403, { ok: false, error: "Forbidden" });
+          return;
+        }
+
         const body = await readJson<{
           kind?: string;
           channelId?: string;
@@ -328,16 +444,47 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         const enabled = body.enabled !== false;
 
         if (!kind || !channelId || !hhmm) {
+          void writeAuditLog({
+            requestId,
+            actor: toAuditActor(session.user),
+            guildId,
+            action: "schedules.upsert",
+            risk: "medium",
+            ok: false,
+            req,
+            meta: { reason: "validation", missing: ["kind", "channelId", "hhmm"].filter((k) => !body?.[k as keyof typeof body]) },
+          });
           sendJson(res, 400, { ok: false, error: "kind, channelId, hhmm are required" });
           return;
         }
         if (!/^\d{2}:\d{2}$/.test(hhmm)) {
+          void writeAuditLog({
+            requestId,
+            actor: toAuditActor(session.user),
+            guildId,
+            action: "schedules.upsert",
+            risk: "medium",
+            ok: false,
+            req,
+            meta: { reason: "validation", field: "hhmm", value: hhmm },
+          });
           sendJson(res, 400, { ok: false, error: "Invalid hhmm (expected HH:MM)" });
           return;
         }
 
         await upsertSchedule(db, { guildId, kind, channelId, hhmm, enabled });
         await triggerBotSchedulerReload(guildId);
+
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId,
+          action: "schedules.upsert",
+          risk: "medium",
+          ok: true,
+          req,
+          meta: { kind, channelId, hhmm, enabled },
+        });
 
         sendJson(res, 200, { ok: true });
         return;
@@ -354,29 +501,61 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
       const kind = decodeURIComponent(kindEnc);
       if (!canManageGuild(session.guilds, guildId)) {
+        void writeAuditLog({
+          requestId,
+          actor: toAuditActor(session.user),
+          guildId,
+          action: "schedules.disable",
+          risk: "medium",
+          ok: false,
+          req,
+          meta: { reason: "forbidden", kind },
+        });
         sendJson(res, 403, { ok: false, error: "Forbidden" });
         return;
       }
       await disableSchedule(db, guildId, kind);
       await triggerBotSchedulerReload(guildId);
+      void writeAuditLog({
+        requestId,
+        actor: toAuditActor(session.user),
+        guildId,
+        action: "schedules.disable",
+        risk: "medium",
+        ok: true,
+        req,
+        meta: { kind },
+      });
       sendJson(res, 200, { ok: true });
       return;
     }
 
     // Bot runtime bridge (optional)
     if (req.method === "GET" && pathname === "/api/bot/health") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
       const out = await fetchBotAdminJson("/health");
       sendJson(res, 200, out);
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/bot/metrics") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
       const out = await fetchBotAdminJson("/api/metrics");
       sendJson(res, 200, out);
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/bot/scheduler/jobs") {
+      if (!isSuperAdmin && manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
       const out = await fetchBotAdminJson("/api/scheduler/jobs");
       sendJson(res, 200, out);
       return;
@@ -384,12 +563,33 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
     if (req.method === "GET" && pathname === "/api/bot/discord/guilds") {
       const out = await fetchBotAdminJson("/api/discord/guilds");
-      sendJson(res, 200, out);
+      if (isSuperAdmin) {
+        sendJson(res, 200, out);
+        return;
+      }
+      if (manageableGuildIds.length === 0) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
+      const base = out as any;
+      const list = Array.isArray(base?.data) ? base.data : null;
+      if (!list) {
+        sendJson(res, 200, out);
+        return;
+      }
+      sendJson(res, 200, {
+        ...base,
+        data: list.filter((g: any) => manageableGuildIds.includes(String(g?.id || ""))),
+      });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/bot/discord/channels") {
       const guildId = url.searchParams.get("guildId") || "";
+      if (!canManageGuild(session.guilds, guildId)) {
+        sendJson(res, 403, { ok: false, error: "Forbidden" });
+        return;
+      }
       const out = await fetchBotAdminJson(`/api/discord/channels?guildId=${encodeURIComponent(guildId)}`);
       sendJson(res, 200, out);
       return;
@@ -595,4 +795,81 @@ function logError(message: string, error: unknown, meta?: Record<string, unknown
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+type WebRole = "super_admin" | "guild_admin" | "guild_manager" | "read_only";
+
+function isSuperAdminUser(userId: string): boolean {
+  return config.superAdminUserIds.includes(userId);
+}
+
+function getGuildRole(guild: DiscordGuild): WebRole {
+  if (guild.owner) return "guild_admin";
+  const perms = BigInt(guild.permissions || "0");
+  const ADMINISTRATOR = 0x8n;
+  const MANAGE_GUILD = 0x20n;
+  if ((perms & ADMINISTRATOR) === ADMINISTRATOR) return "guild_admin";
+  if ((perms & MANAGE_GUILD) === MANAGE_GUILD) return "guild_manager";
+  return "read_only";
+}
+
+function isAuditRisk(value: string): value is AdminAuditLogRisk {
+  return value === "low" || value === "medium" || value === "high" || value === "critical";
+}
+
+function clampInt(
+  raw: string | null,
+  min: number,
+  max: number,
+  fallback: number
+): number {
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function toAuditActor(user: AdminSession["user"]): AdminAuditLogDoc["actor"] {
+  return {
+    userId: user.id,
+    username: user.username,
+    discriminator: user.discriminator,
+    ...(typeof user.global_name !== "undefined" ? { globalName: user.global_name } : {}),
+  };
+}
+
+async function writeAuditLog(params: {
+  requestId: string;
+  actor: AdminAuditLogDoc["actor"];
+  guildId: string | null;
+  action: string;
+  risk: AdminAuditLogRisk;
+  ok: boolean;
+  req: IncomingMessage;
+  meta: Record<string, unknown> | null;
+}): Promise<void> {
+  try {
+    await insertAuditLog(db, {
+      ts: new Date(),
+      requestId: params.requestId,
+      actor: params.actor,
+      guildId: params.guildId,
+      action: params.action,
+      risk: params.risk,
+      ok: params.ok,
+      ip: getClientIp(params.req),
+      userAgent: (params.req.headers["user-agent"] || null) as string | null,
+      meta: params.meta,
+    });
+  } catch (error: unknown) {
+    logError("Audit log write failed (non-fatal)", error, { requestId: params.requestId });
+  }
+}
+
+function getClientIp(req: IncomingMessage): string | null {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) {
+    const first = xff.split(",")[0]?.trim();
+    return first || null;
+  }
+  return req.socket.remoteAddress || null;
 }
