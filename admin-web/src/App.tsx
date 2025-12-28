@@ -12,6 +12,7 @@ import { AuditPage } from "./pages/Audit";
 import { MetricsPage } from "./pages/Metrics";
 import { RuntimePage } from "./pages/Runtime";
 import { PersonasPage } from "./pages/Personas";
+import { RagPage } from "./pages/Rag";
 import { PlaceholderPage } from "./pages/Placeholder";
 import { normalizePathname } from "./router";
 import type { MeResponse } from "./types";
@@ -108,7 +109,7 @@ export default function App() {
       case "/personas":
         return <PersonasPage me={me} selectedGuildId={selectedGuildId} />;
       case "/rag":
-        return <PlaceholderPage title="RAG" detail="Next: upload, ingest, reindex, and query test." />;
+        return <RagPage me={me} selectedGuildId={selectedGuildId} />;
       case "/economy":
         return (
           <PlaceholderPage title="Economy / Games" detail="Next: points, leaderboard, achievements, and minigame settings." />

@@ -9,6 +9,10 @@ import type {
   MeResponse,
   PersonaDoc,
   PersonaSummary,
+  RagReloadResponse,
+  RagSearchResponse,
+  RagSourceDoc,
+  RagSourceRow,
   ScheduleRow,
 } from "./types";
 
@@ -16,11 +20,13 @@ const DEMO_KEY = "admin_demo_mode";
 const SCHEDULES_KEY = "admin_demo_schedules_v1";
 const AUDIT_KEY = "admin_demo_audit_v1";
 const PERSONAS_KEY = "admin_demo_personas_v1";
+const RAG_KEY = "admin_demo_rag_sources_v1";
 
 type DemoState = {
   schedulesByGuild: Record<string, ScheduleRow[]>;
   audit: AuditLogRow[];
   personas: PersonaDoc[];
+  ragSources: RagSourceDoc[];
 };
 
 export function isDemoMode(): boolean {
@@ -91,6 +97,18 @@ export function demoGet<T>(path: string): T {
   if (personaMatch) {
     const id = decodeURIComponent(personaMatch[1] || "");
     return demoPersonaById(id) as unknown as T;
+  }
+
+  if (url.pathname === "/api/rag/sources") {
+    const q = (url.searchParams.get("q") || "").trim();
+    const limit = clampInt(url.searchParams.get("limit"), 1, 500, 200);
+    return demoRagSourcesList({ q, limit }) as unknown as T;
+  }
+
+  const ragMatch = url.pathname.match(/^\/api\/rag\/sources\/([^/]+)$/);
+  if (ragMatch) {
+    const name = decodeURIComponent(ragMatch[1] || "");
+    return demoRagSourceByName(name) as unknown as T;
   }
 
   if (url.pathname === "/api/audit") {
@@ -174,6 +192,25 @@ export function demoPost<T>(path: string, body: unknown): T {
     return result as unknown as T;
   }
 
+  if (url.pathname === "/api/bot/ai/rag/search") {
+    const input = body as any;
+    const query = String(input?.query || "").trim();
+    if (!query) return ({ results: [] } as unknown) as T;
+
+    const topK = clampInt(String(input?.topK ?? ""), 1, 10, 3);
+    const minScoreRaw = Number.parseFloat(String(input?.minScore ?? ""));
+    const minScore = Number.isFinite(minScoreRaw) ? Math.max(0, Math.min(1, minScoreRaw)) : 0.05;
+
+    const results = demoRagSearch(query, { topK, minScore });
+    appendAudit({ action: "rag.searchTest", guildId: null, risk: "low", ok: true, meta: { queryLen: query.length } });
+    return ({ results } as RagSearchResponse) as unknown as T;
+  }
+
+  if (url.pathname === "/api/bot/ai/rag/reload") {
+    appendAudit({ action: "rag.reload", guildId: null, risk: "medium", ok: true, meta: null });
+    return ({ reloaded: true } as RagReloadResponse) as unknown as T;
+  }
+
   const schedMatch = url.pathname.match(/^\/api\/guilds\/([^/]+)\/schedules$/);
   if (schedMatch) {
     const guildId = schedMatch[1]!;
@@ -214,6 +251,36 @@ export function demoPost<T>(path: string, body: unknown): T {
     });
 
     return undefined as unknown as T;
+  }
+
+  if (url.pathname === "/api/rag/sources") {
+    const input = body as any;
+    const nameRaw = String(input?.name || "").trim();
+    const name = sanitizeRagFilename(nameRaw);
+    const content = typeof input?.content === "string" ? input.content : "";
+
+    if (!name) throw new Error("Demo: name must be a safe .md filename");
+    if (!content.trim()) throw new Error("Demo: content is required");
+    if (content.length > 512_000) throw new Error("Demo: content too large (max 512KB)");
+
+    const state = loadState();
+    const now = new Date().toISOString();
+    const existing = state.ragSources.find((s) => s.name === name);
+    const created = !existing;
+    const next: RagSourceDoc = {
+      name,
+      title: parseRagTitleFromMarkdown(content),
+      sizeBytes: content.length,
+      updatedAt: now,
+      content,
+    };
+
+    state.ragSources = created ? [next, ...state.ragSources] : state.ragSources.map((s) => (s.name === name ? next : s));
+    saveState(state);
+
+    appendAudit({ action: "rag.upsertSource", guildId: null, risk: "high", ok: true, meta: { name, created } });
+
+    return ({ ...next, created } as unknown) as T;
   }
 
   if (url.pathname === "/api/personas") {
@@ -302,21 +369,38 @@ export function demoDelete(path: string): void {
   const url = new URL(path, "http://demo.local");
 
   const match = url.pathname.match(/^\/api\/guilds\/([^/]+)\/schedules\/([^/]+)$/);
-  if (!match) {
-    throw new Error(`Demo API: no handler for DELETE ${url.pathname}`);
+  if (match) {
+    const guildId = match[1]!;
+    const kind = decodeURIComponent(match[2]!);
+    const state = loadState();
+    const list = state.schedulesByGuild[guildId] || [];
+    const now = new Date().toISOString();
+    state.schedulesByGuild[guildId] = list.map((r) =>
+      r.kind === kind ? { ...r, enabled: false, updatedAt: now } : r
+    );
+    saveState(state);
+
+    appendAudit({ action: "schedules.disable", guildId, risk: "medium", ok: true, meta: { kind } });
+    return;
   }
 
-  const guildId = match[1]!;
-  const kind = decodeURIComponent(match[2]!);
-  const state = loadState();
-  const list = state.schedulesByGuild[guildId] || [];
-  const now = new Date().toISOString();
-  state.schedulesByGuild[guildId] = list.map((r) =>
-    r.kind === kind ? { ...r, enabled: false, updatedAt: now } : r
-  );
-  saveState(state);
+  const ragMatch = url.pathname.match(/^\/api\/rag\/sources\/([^/]+)$/);
+  if (ragMatch) {
+    const name = decodeURIComponent(ragMatch[1] || "");
+    const safe = sanitizeRagFilename(name);
+    if (!safe) throw new Error("Demo: invalid source name");
 
-  appendAudit({ action: "schedules.disable", guildId, risk: "medium", ok: true, meta: { kind } });
+    const state = loadState();
+    const existing = state.ragSources.some((s) => s.name === safe);
+    state.ragSources = state.ragSources.filter((s) => s.name !== safe);
+    saveState(state);
+
+    appendAudit({ action: "rag.deleteSource", guildId: null, risk: "high", ok: existing, meta: { name: safe } });
+    if (!existing) throw new Error("Demo: source not found");
+    return;
+  }
+
+  throw new Error(`Demo API: no handler for DELETE ${url.pathname}`);
 }
 
 function demoMe(): MeResponse {
@@ -446,6 +530,7 @@ function loadState(): DemoState {
     schedulesByGuild: defaultSchedules(),
     audit: defaultAudit(),
     personas: defaultPersonas(),
+    ragSources: defaultRagSources(),
   };
 
   try {
@@ -466,6 +551,12 @@ function loadState(): DemoState {
       const parsed = JSON.parse(rawPersonas) as DemoState["personas"];
       if (Array.isArray(parsed)) base.personas = parsed;
     }
+
+    const rawRag = localStorage.getItem(RAG_KEY);
+    if (rawRag) {
+      const parsed = JSON.parse(rawRag) as DemoState["ragSources"];
+      if (Array.isArray(parsed)) base.ragSources = parsed;
+    }
   } catch {
     // ignore
   }
@@ -478,6 +569,7 @@ function saveState(state: DemoState): void {
     localStorage.setItem(SCHEDULES_KEY, JSON.stringify(state.schedulesByGuild));
     localStorage.setItem(AUDIT_KEY, JSON.stringify(state.audit));
     localStorage.setItem(PERSONAS_KEY, JSON.stringify(state.personas));
+    localStorage.setItem(RAG_KEY, JSON.stringify(state.ragSources));
   } catch {
     // ignore
   }
@@ -603,6 +695,28 @@ function defaultPersonas(): PersonaDoc[] {
   ];
 }
 
+function defaultRagSources(): RagSourceDoc[] {
+  const now = new Date().toISOString();
+  const elio = `---\ntitle: \"Elio (Demo)\"\n---\n\n# Elio\n\nElio is the kid ambassador to the Communiverse.\n`;
+  const glordon = `---\ntitle: \"Glordon (Demo)\"\n---\n\n# Glordon\n\nGlordon is Elio's alien best friend.\n`;
+  return [
+    {
+      name: "character_elio_demo.md",
+      title: parseRagTitleFromMarkdown(elio),
+      sizeBytes: elio.length,
+      updatedAt: now,
+      content: elio,
+    },
+    {
+      name: "character_glordon_demo.md",
+      title: parseRagTitleFromMarkdown(glordon),
+      sizeBytes: glordon.length,
+      updatedAt: now,
+      content: glordon,
+    },
+  ];
+}
+
 function appendAudit(params: {
   action: string;
   guildId: string | null;
@@ -672,6 +786,88 @@ function demoPersonaById(id: string): PersonaDoc {
   const doc = state.personas.find((p) => p.id === id);
   if (!doc) throw new Error("Demo: persona not found");
   return doc;
+}
+
+function demoRagSourcesList(params: { q: string; limit: number }): RagSourceRow[] {
+  const q = params.q.trim().toLowerCase();
+  const state = loadState();
+  let rows = [...state.ragSources];
+  if (q) {
+    rows = rows.filter((r) => `${r.name} ${r.title || ""}`.toLowerCase().includes(q));
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return rows.slice(0, params.limit).map((r) => ({
+    name: r.name,
+    title: r.title,
+    sizeBytes: r.sizeBytes,
+    updatedAt: r.updatedAt,
+  }));
+}
+
+function demoRagSourceByName(name: string): RagSourceDoc {
+  const safe = sanitizeRagFilename(name);
+  if (!safe) throw new Error("Demo: invalid source name");
+  const state = loadState();
+  const doc = state.ragSources.find((r) => r.name === safe);
+  if (!doc) throw new Error("Demo: source not found");
+  return doc;
+}
+
+function demoRagSearch(query: string, params: { topK: number; minScore: number }) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const state = loadState();
+  const tokens = q.split(/\s+/).filter(Boolean);
+
+  const scored = state.ragSources.map((doc) => {
+    const hay = `${doc.title || ""}\n${doc.content}`.toLowerCase();
+    let hits = 0;
+    for (const t of tokens) {
+      if (t.length < 2) continue;
+      if (hay.includes(t)) hits += 1;
+    }
+    const score = hits / Math.max(tokens.length, 1);
+    return {
+      title: doc.title || doc.name,
+      source: doc.name,
+      content: doc.content.slice(0, 800),
+      score,
+      character: null,
+    };
+  });
+
+  return scored
+    .filter((r) => r.score >= params.minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, params.topK);
+}
+
+function sanitizeRagFilename(raw: string): string | null {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!name) return null;
+  if (name.length > 128) return null;
+  if (!name.endsWith(".md")) return null;
+  if (name.includes("/") || name.includes("\\")) return null;
+  if (name.includes("..")) return null;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.md$/.test(name)) return null;
+  return name;
+}
+
+function parseRagTitleFromMarkdown(markdown: string): string | null {
+  const raw = typeof markdown === "string" ? markdown : "";
+  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!match) return null;
+
+  const block = match[1] || "";
+  for (const line of block.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    if (key !== "title") continue;
+    const value = line.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
+    return value || null;
+  }
+  return null;
 }
 
 function coerceStringArray(value: unknown): string[] {

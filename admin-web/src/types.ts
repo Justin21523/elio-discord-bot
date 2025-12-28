@@ -122,3 +122,34 @@ export type PersonaDoc = {
   createdAt: string | null;
   updatedAt: string | null;
 };
+
+export type RagSourceRow = {
+  name: string;
+  title: string | null;
+  sizeBytes: number;
+  updatedAt: string;
+};
+
+export type RagSourceDoc = RagSourceRow & {
+  content: string;
+};
+
+export type RagSearchResult = {
+  title: string;
+  source: string;
+  content: string;
+  score: number;
+  character: string | null;
+};
+
+export type RagSearchResponse = {
+  results: RagSearchResult[];
+};
+
+export type RagUpsertResponse = RagSourceRow & {
+  created: boolean;
+};
+
+export type RagReloadResponse = {
+  reloaded: boolean;
+};
