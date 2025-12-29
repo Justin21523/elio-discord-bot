@@ -51,6 +51,7 @@ backup/
 # local data
 .llm_provider/
 models/
+data/
 
 # Misc
 *.swp
