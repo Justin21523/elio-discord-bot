@@ -6,8 +6,9 @@
  * 2. @tag bot + persona name = respond with that persona's avatar webhook
  * 3. @tag bot without persona name = respond as Elio (default)
  * 4. Reply to bot/persona message = continue conversation with that persona
- * 5. "PersonaName: message" format = user is RPing as that persona, bot responds
- *    - Example: "Caleb: hey what's up" → user is RPing as Caleb, bot responds
+ * 5. "personaName: message" format = user is RPing as that persona, bot responds (lowercase prefix only)
+ *    - Example: "caleb: hey what's up" → user is RPing as Caleb, bot responds
+ *    - "Caleb: ..." (capitalized) does NOT trigger
  *    - Just "Caleb hey" without colon = NO response (unless @tagged)
  *
  * Features:
@@ -159,12 +160,13 @@ function detectAddressee(content: string, personaList: PersonaRef[]): { persona:
 }
 
 /**
- * Detect if user is RPing as a persona using "PersonaName:" prefix format.
+ * Detect if user is RPing as a persona using "personaName:" prefix format (lowercase only).
  * This triggers a response even without @mentioning the bot.
  *
  * Examples:
- * - "Caleb: hey what's up" → { isRp: true, rpAsPersona: 'Caleb', messageContent: 'hey what\'s up' }
+ * - "caleb: hey what's up" → { isRp: true, rpAsPersona: 'Caleb', messageContent: 'hey what\'s up' }
  * - "caleb: *waves*" → { isRp: true, rpAsPersona: 'Caleb', messageContent: '*waves*' }
+ * - "Caleb: hey" → { isRp: false } (capitalized prefix does not trigger)
  * - "Caleb hey" → { isRp: false } (no colon = not RP format)
  *
  * @param {string} content - Message content
@@ -175,7 +177,7 @@ function detectRpPrefix(
   content: string,
   personaList: PersonaRef[]
 ): RpPrefixResult {
-  // Match pattern: PersonaName: (case insensitive, with optional whitespace)
+  // Match pattern: personaName: (requires user-typed lowercase prefix)
   // Must be at the start of the message
   const rpPrefixMatch = content.match(/^(\w+)\s*:\s*(.+)/s);
 
@@ -187,6 +189,10 @@ function detectRpPrefix(
   const potentialNameRaw = rpPrefixMatch[1];
   const messageContentRaw = rpPrefixMatch[2];
   if (!potentialNameRaw || !messageContentRaw) return { isRp: false };
+
+  // IMPORTANT: Only trigger on lowercase prefixes (e.g. "caleb: ...").
+  // This avoids accidental triggers on normal capitalization (e.g. "Caleb: ...").
+  if (potentialNameRaw !== potentialNameRaw.toLowerCase()) return { isRp: false };
 
   const potentialName = potentialNameRaw.toLowerCase();
   const messageContent = messageContentRaw.trim();
@@ -268,7 +274,7 @@ export async function execute(message: any, services: any) {
     }
   }
 
-  // Check for RP prefix format: "PersonaName: message"
+  // Check for RP prefix format: "personaName: message" (lowercase only)
   // This triggers response even without @mention
   let isRpPrefix = false;
   let rpPrefixData: RpPrefixResult | null = null;
@@ -308,7 +314,7 @@ export async function execute(message: any, services: any) {
       reason = 'reply_to_persona';
       console.log(`[INT] Continuing conversation with ${repliedToPersona}`);
     } else if (rpPrefixData?.isRp) {
-      // User is RPing as a persona using "PersonaName:" prefix
+      // User is RPing as a persona using "personaName:" prefix (lowercase only)
       // Select a DIFFERENT persona to respond (not the one they're RPing as)
       rpContext = `roleplaying_as_${rpPrefixData.rpAsPersona}`;
 
