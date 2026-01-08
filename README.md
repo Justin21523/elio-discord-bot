@@ -8,24 +8,26 @@ A production-ready Discord bot with **LLM (fine-tuned personas), RAG, VLM (image
 
 ## Table of Contents
 
-- [Communiverse / Elioverse Bot](#communiverse--elioverse-bot)
-  - [Table of Contents](#table-of-contents)
-  - [Features](#features)
-  - [Architecture](#architecture)
-  - [Requirements](#requirements)
-  - [Quick Start (Docker)](#quick-start-docker)
-  - [Configuration](#configuration)
-  - [Slash Commands \& DM Flows](#slash-commands--dm-flows)
-  - [Proactive Jobs (Scheduler)](#proactive-jobs-scheduler)
-  - [Training \& Fine-Tuning](#training--fine-tuning)
-    - [1) Local/Container Fine-Tuning (LoRA on DeepSeek-7B Chat)](#1-localcontainer-fine-tuning-lora-on-deepseek-7b-chat)
-    - [2) Multi-Character Data Generation (if you need more)](#2-multi-character-data-generation-if-you-need-more)
-  - [Testing \& Verification](#testing--verification)
-  - [Performance](#performance)
-  - [Troubleshooting](#troubleshooting)
-  - [Project Structure](#project-structure)
-  - [License](#license)
-    - [Production Status (for the record)](#production-status-for-the-record)
+- [Features](#features)
+- [How To Use (Discord)](#how-to-use-discord)
+  - [Auto-Replies: `/assistant`](#auto-replies-assistant)
+  - [Scene Threads: `/scene`](#scene-threads-scene)
+  - [Server Admin Setup: `/config-assistant`](#server-admin-setup-config-assistant)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Quick Start (Docker)](#quick-start-docker)
+- [Configuration](#configuration)
+- [Slash Commands & DM Flows](#slash-commands--dm-flows)
+- [Proactive Jobs (Scheduler)](#proactive-jobs-scheduler)
+- [Training & Fine-Tuning](#training--fine-tuning)
+  - [1) Local/Container Fine-Tuning (LoRA on DeepSeek-7B Chat)](#1-localcontainer-fine-tuning-lora-on-deepseek-7b-chat)
+  - [2) Multi-Character Data Generation (if you need more)](#2-multi-character-data-generation-if-you-need-more)
+- [Testing & Verification](#testing--verification)
+- [Performance](#performance)
+- [Troubleshooting](#troubleshooting)
+- [Project Structure](#project-structure)
+- [License](#license)
+  - [Production Status (for the record)](#production-status-for-the-record)
 
 ---
 
@@ -41,7 +43,10 @@ A production-ready Discord bot with **LLM (fine-tuned personas), RAG, VLM (image
   Image analysis gets woven into persona-style replies in channels and DMs.
 
 * **Conversation Memory**
-  Per-channel & per-persona, last ~10 messages, ~30-minute TTL, auto-prune.
+  Per-channel & **per-user** & per-persona, last ~10 messages, ~30-minute TTL, auto-prune (prevents cross-user contamination).
+
+* **Assistant Auto-Replies (Opt-in)**
+  Per-user modes (`off` / `mentions` / `full`), plus server-level **channel whitelist** and **/scene threads** for safe RP (includes scene recap on end + background cleanup).
 
 * **Proactive Engagement**
   Mentions, keyword triggers, random engagement (with cooldowns), and cron-driven content (meme drops, mini-games, story weave, world builder).
@@ -54,24 +59,89 @@ A production-ready Discord bot with **LLM (fine-tuned personas), RAG, VLM (image
 
 ---
 
+## How To Use (Discord)
+
+This section is for **server users** and **server admins** who want the latest behavior in plain language.
+
+### Auto-Replies: `/assistant`
+
+Auto-replies are **per-user** and **per-server**.
+
+Modes:
+- `off`: no message-based replies (slash commands still work)
+- `mentions` (default): replies only when you **@mention the bot** or **reply** to a bot/persona message
+- `full`: same as `mentions`, plus RP prefix triggers like `caleb:` (see below)
+
+Enable/disable:
+- Enable full mode: `/assistant on` (or `/assistant mode value:full`)
+- Disable: `/assistant off`
+- Check status: `/assistant status`
+
+RP prefix trigger (full mode only):
+- Must be **lowercase**: `caleb: hello` ✅, `Caleb: hello` ❌
+- `:` and `：` (fullwidth colon) are both supported
+- Only works in:
+  - channels allowed by the server’s **full-mode whitelist**, or
+  - an active **/scene** thread
+
+Notes:
+- In **scene threads**, the bot avoids `@mention` in its reply to keep the RP clean.
+- The bot has an in-flight guard to reduce “double replies” if you send multiple triggers quickly.
+
+### Scene Threads: `/scene`
+
+Scenes are thread-based RP spaces. They make “full mode” safe and contained.
+
+Common flows:
+- Start a new scene thread: `/scene start` (from a normal text channel)
+- Adopt an existing thread as a scene: `/scene adopt` (requires **Manage Threads** or thread owner)
+- Post a scene starter prompt: `/scene prompt persona:<name> situation:<text>`
+- Check status: `/scene status`
+- End (and archive) a scene: `/scene end`
+
+Scene recap:
+- When you end a scene, the bot tries to generate and post a **Scene Recap**.
+- If recap generation fails, it is retried in the background.
+
+Scene lifecycle safety:
+- If a scene thread is **archived or deleted manually**, the bot automatically ends the scene record to prevent “stuck active” scenes.
+
+### Server Admin Setup: `/config-assistant`
+
+This is an **admin-only** command to keep auto-replies maintainable.
+
+Recommended setup:
+- View current settings: `/config-assistant view`
+- Enable whitelist for full mode (RP prefix): `/config-assistant whitelist-enable enabled:true`
+- Add allowed channels: `/config-assistant whitelist-add channel:#your-channel`
+- Enable/disable scenes: `/config-assistant scenes-enable enabled:true|false`
+- Set default scene auto-archive duration: `/config-assistant scenes-auto-archive minutes:1440`
+
+Important:
+- The whitelist affects **only** the `full` mode RP prefix trigger (e.g. `caleb:`).
+- `mentions` mode (bot @mentions / replies) can still work outside the whitelist (unless a user sets `/assistant off`).
+
+---
+
 ## Architecture
 
-High-level flow from Discord → Router → AI Service (LLM/RAG/VLM) → Webhooks back to Discord, with cron jobs for proactive content. File locations, responsibilities, and service boundaries are spelled out below.
+High-level flow from Discord → bot (Node.js) → AI services (optional) → persona-styled output back to Discord, plus cron jobs for proactive content.
 
 ```
 Discord Gateway
-  ├─ messageCreate (guild)  → src/events/messageCreate.js
-  └─ dmCreate (DMs)         → src/events/dmCreate.js
-         ↓
-   src/services/messageRouter.js
-     ├─ triggers & cooldowns
-     ├─ conversationHistory (TTL)
-     ├─ RAG (K=10, minScore=0.5)
-     ├─ VLM (if image)
-     └─ persona composition → ai-service (FastAPI)
-         ├─ LLM (finetuned adapters)
-         ├─ RAG search
-         └─ VLM analysis
+  ├─ Guild messages → src/events/messageCreate.ts
+  │   ├─ triggers: @mention / reply / (full mode) RP prefix like `caleb:`
+  │   ├─ per-user mode gating → /assistant
+  │   ├─ whitelist + scene gating for RP prefix → /config-assistant + /scene
+  │   ├─ reply strategies: llama.cpp (optional) → personaLogic → local fallback
+  │   └─ persona output → src/services/webhooks.ts (webhook or embed fallback)
+  └─ DMs → src/events/dmCreate.ts → src/handlers/dmHandlers.ts
+      ├─ DM chat + persona switching
+      └─ DM mini-games
+
+AI stack (optional / mixed):
+  - ai-service/ (FastAPI): personaLogic, IR/RAG utilities, Markov/recs endpoints
+  - optional llama.cpp server: fast on-device inference (USE_LLAMA_SERVER=true)
 ```
 
 Persistence across MongoDB (profiles, personas, scenarios, game state) + vector store (Atlas Vector Search or FAISS). Webhook sender handles persona avatar/name.
@@ -124,6 +194,10 @@ docker compose exec bot npm run deploy-commands
 * **Performance mode (preload LLM 8-bit)**: set `PRELOAD_LLM=true` in the AI service env and recreate the service.
 * **Back to Multi-task**: set `PRELOAD_LLM=false`.
 
+**Remote deployment (maintainers):**
+- See `docs/REMOTE_DEPLOYMENT.md`
+- Use `scripts/deploy-remote.example.sh` for a safe, bot-only restart workflow (keep secrets in `.env.deploy`, do not commit)
+
 ---
 
 ## Configuration
@@ -167,7 +241,11 @@ LOG_LEVEL=info
 ## Slash Commands & DM Flows
 
 Core commands include:
-`/ai, /rag, /persona, /scenario, /game, /minigame, /profile, /leaderboard, /points, /greet, /story, /finetune, /config-proactive, /schedule, /drop, /admin-data`.
+`/help, /assistant, /scene, /config-assistant, /ai, /rag, /persona, /scenario, /game, /minigame, /profile, /leaderboard, /points, /greet, /story, /finetune, /config-proactive, /schedule, /drop, /admin-data`.
+
+Quick help:
+- `/help` shows a categorized command guide (recommended)
+- `!help` in a server channel shows the DM help guide
 
 DM helpers: `!persona`, `!game trivia`, `!story`, `!clear`, `!status`. Mini-game loop includes start/status/answer/stop with scoring & logs.
 
@@ -251,13 +329,19 @@ ai-service/
   app/services/vlm/                        # vision
   models/finetuned.py                      # LoRA loading & use
 src/
-  events/messageCreate.js | dmCreate.js    # Discord intake
-  services/messageRouter.js                # triggers, routing, memory
-  services/conversationHistory.js          # per persona/channel
-  services/webhooks.js                     # persona avatar/name
-  handlers/dmHandlers.js                   # DM chat + mini-games
-  handlers/proactiveHandlers.js            # jobs orchestration
-  jobs/*.js                                # scheduled jobs
+  index.ts                                 # entry point + router + cron
+  events/messageCreate.ts | dmCreate.ts    # Discord intake
+  commands/assistant.ts                    # per-user auto-reply mode
+  commands/config-assistant.ts             # admin: whitelist + scenes config
+  commands/scene.ts                        # thread-based RP scenes (+ recap)
+  services/assistantGuildSettings.ts       # guild assistant settings
+  services/assistantScenes.ts              # scene persistence + recap state
+  services/conversationHistory.ts          # per-channel/per-user/per-persona memory (TTL)
+  services/webhooks.ts                     # persona avatar/name (webhook or embed fallback)
+  handlers/dmHandlers.ts                   # DM chat + mini-games
+  jobs/sceneCleanup.ts                     # cleanup active scene records
+  jobs/sceneRecap.ts                       # background recap generator
+  jobs/*.ts                                # scheduled jobs
 scripts/                                   # seed/ingest/test/deploy
 ```
 
