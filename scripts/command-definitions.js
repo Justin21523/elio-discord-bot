@@ -68,6 +68,222 @@ export const commands = [
       },
     ],
   },
+  {
+    name: "assistant",
+    description: "Control AI auto-replies for you in this server",
+    dm_permission: false,
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "status",
+        description: "Show your current auto-reply mode",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "mode",
+        description: "Set your auto-reply mode",
+        options: [
+          {
+            type: 3, // STRING
+            name: "value",
+            description: "How the bot should reply to your messages here",
+            required: true,
+            choices: [
+              { name: "Off (no message replies)", value: "off" },
+              { name: "Mentions only (default)", value: "mentions" },
+              { name: "Full (allow RP prefix like 'caleb:')", value: "full" },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "on",
+        description: "Shortcut: set mode to full",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "off",
+        description: "Shortcut: set mode to off",
+      },
+    ],
+  },
+  {
+    name: "scene",
+    description: "Start and manage RP scene threads",
+    dm_permission: false,
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "start",
+        description: "Start a new scene thread in this channel",
+        options: [
+          {
+            type: 3, // STRING
+            name: "title",
+            description: "Optional scene title",
+            required: false,
+          },
+          {
+            type: 4, // INTEGER
+            name: "auto_archive",
+            description: "Thread auto-archive duration (minutes)",
+            required: false,
+            choices: [
+              { name: "60 (1 hour)", value: 60 },
+              { name: "1440 (24 hours)", value: 1440 },
+              { name: "4320 (3 days)", value: 4320 },
+              { name: "10080 (7 days)", value: 10080 },
+            ],
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "adopt",
+        description: "Mark an existing thread as a scene (enables full mode there)",
+        options: [
+          {
+            type: 7, // CHANNEL
+            name: "thread",
+            description: "Thread to adopt (omit if you run this inside the thread)",
+            required: false,
+            channel_types: [11, 12, 10], // PublicThread, PrivateThread, AnnouncementThread
+          },
+          {
+            type: 3, // STRING
+            name: "title",
+            description: "Optional scene title override",
+            required: false,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "prompt",
+        description: "Post a scene starter prompt (persona + situation)",
+        options: [
+          {
+            type: 3, // STRING
+            name: "persona",
+            description: "Persona name (optional)",
+            required: false,
+          },
+          {
+            type: 3, // STRING
+            name: "situation",
+            description: "Optional situation/context to set the scene",
+            required: false,
+            max_length: 500,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "end",
+        description: "End this scene (run inside the scene thread)",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "status",
+        description: "Show scene status for this thread",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "list",
+        description: "List active scenes in this server",
+      },
+    ],
+  },
+  {
+    name: "config-assistant",
+    description: "Configure assistant auto-replies and scene threads",
+    dm_permission: false,
+    default_member_permissions: "8", // Administrator
+    options: [
+      {
+        type: 1, // SUB_COMMAND
+        name: "view",
+        description: "View current assistant settings",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "whitelist-enable",
+        description: "Enable/disable channel whitelist for full mode (RP prefix)",
+        options: [
+          {
+            type: 5, // BOOLEAN
+            name: "enabled",
+            description: "If enabled, full mode only works in whitelisted channels (or scenes)",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "whitelist-add",
+        description: "Add a channel to the full-mode whitelist",
+        options: [
+          {
+            type: 7, // CHANNEL
+            name: "channel",
+            description: "Channel to allow full mode in",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "whitelist-remove",
+        description: "Remove a channel from the full-mode whitelist",
+        options: [
+          {
+            type: 7, // CHANNEL
+            name: "channel",
+            description: "Channel to remove",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "whitelist-clear",
+        description: "Clear the full-mode whitelist",
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "scenes-enable",
+        description: "Enable/disable scene threads",
+        options: [
+          {
+            type: 5, // BOOLEAN
+            name: "enabled",
+            description: "Allow /scene threads",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: 1, // SUB_COMMAND
+        name: "scenes-auto-archive",
+        description: "Set default auto-archive duration for scene threads",
+        options: [
+          {
+            type: 4, // INTEGER
+            name: "minutes",
+            description: "Thread auto-archive duration (minutes)",
+            required: true,
+            choices: [
+              { name: "60 (1 hour)", value: 60 },
+              { name: "1440 (24 hours)", value: 1440 },
+              { name: "4320 (3 days)", value: 4320 },
+              { name: "10080 (7 days)", value: 10080 },
+            ],
+          },
+        ],
+      },
+    ],
+  },
 
   // Phase 1: Drop System
   {

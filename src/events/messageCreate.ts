@@ -24,12 +24,14 @@ import { interactionLogger } from '../services/interactionLogger.js';
 import { generatePersonaReply, isLlamaEnabled, checkLlamaHealth, analyzeConversationContext } from '../services/ai/adapters/llamaCppAdapter.js';
 import { USE_LLAMA_SERVER } from '../config.js';
 import { localPersonaReply } from '../services/ai/localPersonaFallback.js';
+import { getChatMode } from '../services/userChatSettings.js';
+import { getAssistantGuildSettings } from '../services/assistantGuildSettings.js';
+import { isSceneActive } from '../services/assistantScenes.js';
+import { logger } from '../util/logger.js';
+import { detectRpPrefix, type RpPrefixResult } from '../util/rpPrefix.js';
 
 type PersonaRef = { name: string };
 type Mention = { name: string; position: number; context: string; isObject?: boolean };
-type RpPrefixResult =
-  | { isRp: false }
-  | { isRp: true; rpAsPersona: string; messageContent: string };
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -43,6 +45,9 @@ function getErrorMessage(error: unknown): string {
 let llamaServerAvailable: boolean | null = null;
 let lastLlamaCheck = 0;
 const LLAMA_CHECK_INTERVAL_MS = 60000; // 1 minute
+
+const REPLY_IN_FLIGHT_TTL_MS = 90_000;
+const replyInFlight = new Map<string, number>();
 
 async function isLlamaServerAvailable(): Promise<boolean> {
   const now = Date.now();
@@ -159,63 +164,6 @@ function detectAddressee(content: string, personaList: PersonaRef[]): { persona:
   return { persona: mentions[0]!.name, reason: 'first_mentioned' };
 }
 
-/**
- * Detect if user is RPing as a persona using "personaName:" prefix format (lowercase only).
- * This triggers a response even without @mentioning the bot.
- *
- * Examples:
- * - "caleb: hey what's up" → { isRp: true, rpAsPersona: 'Caleb', messageContent: 'hey what\'s up' }
- * - "caleb: *waves*" → { isRp: true, rpAsPersona: 'Caleb', messageContent: '*waves*' }
- * - "Caleb: hey" → { isRp: false } (capitalized prefix does not trigger)
- * - "Caleb hey" → { isRp: false } (no colon = not RP format)
- *
- * @param {string} content - Message content
- * @param {Array<{name: string}>} personaList - Available personas
- * @returns {{ isRp: boolean, rpAsPersona?: string, messageContent?: string }}
- */
-function detectRpPrefix(
-  content: string,
-  personaList: PersonaRef[]
-): RpPrefixResult {
-  // Match pattern: personaName: (requires user-typed lowercase prefix)
-  // Must be at the start of the message
-  const rpPrefixMatch = content.match(/^(\w+)\s*:\s*(.+)/s);
-
-  console.log(`[RP-DEBUG] Checking RP prefix for: "${content.substring(0, 50)}..."`);
-  console.log(`[RP-DEBUG] Regex match result:`, rpPrefixMatch ? `name="${rpPrefixMatch[1] ?? ''}"` : 'no match');
-
-  if (!rpPrefixMatch) return { isRp: false };
-
-  const potentialNameRaw = rpPrefixMatch[1];
-  const messageContentRaw = rpPrefixMatch[2];
-  if (!potentialNameRaw || !messageContentRaw) return { isRp: false };
-
-  // IMPORTANT: Only trigger on lowercase prefixes (e.g. "caleb: ...").
-  // This avoids accidental triggers on normal capitalization (e.g. "Caleb: ...").
-  if (potentialNameRaw !== potentialNameRaw.toLowerCase()) return { isRp: false };
-
-  const potentialName = potentialNameRaw.toLowerCase();
-  const messageContent = messageContentRaw.trim();
-
-  console.log(`[RP-DEBUG] Looking for persona "${potentialName}" in list:`, personaList.map((p) => p.name));
-
-  // Check if the prefix matches a known persona
-  for (const p of personaList) {
-    if (p.name.toLowerCase() === potentialName) {
-      console.log(`[RP-DEBUG] MATCH FOUND: ${p.name}`);
-      return {
-        isRp: true,
-        rpAsPersona: p.name,
-        messageContent: messageContent
-      };
-    }
-  }
-
-  // Prefix doesn't match any persona
-  console.log(`[RP-DEBUG] No matching persona found`);
-  return { isRp: false };
-}
-
 let autoReplyManager: any = null;
 
 export const name = Events.MessageCreate;
@@ -274,26 +222,74 @@ export async function execute(message: any, services: any) {
     }
   }
 
+  // User-controlled chat mode (per guild):
+  // - off: no message-based replies
+  // - mentions (default): only reply on @mentions/replies
+  // - full: also allow RP prefix like "caleb:"
+  const chatModeRes = await getChatMode(String(message.guildId), String(message.author.id));
+  const chatMode = chatModeRes.ok ? chatModeRes.data.mode : 'mentions';
+
+  if (chatMode === 'off') {
+    // If the user explicitly tries to talk to the bot, give a short hint.
+    if (isMentioned || isReplyToBot) {
+      try {
+        await message.reply('Auto-replies are disabled for you. Use `/assistant on` (or `/assistant mode`) to enable.');
+      } catch {
+        // Ignore reply failures (missing perms, deleted message, etc.)
+      }
+    }
+    return;
+  }
+
+  // Cache commonly used IDs for this event
+  const guildId = String(message.guildId);
+  const channelId = String(message.channelId);
+
+  let allowRpPrefix = false;
+  let isActiveSceneThread = false;
+  let scenesEnabled = true;
+  if (chatMode === 'full') {
+    const isThreadChannel = !!message.channel && typeof message.channel.isThread === 'function' && message.channel.isThread();
+    const parentChannelId =
+      isThreadChannel && message.channel?.parentId ? String(message.channel.parentId) : null;
+
+    const settingsRes = await getAssistantGuildSettings(guildId);
+    const settings = settingsRes.ok ? settingsRes.data : null;
+
+    const whitelistEnabled = settings?.fullModeWhitelistEnabled === true;
+    const allowedChannelIds = settings?.fullModeChannelIds ?? [];
+    scenesEnabled = settings?.scenesEnabled !== false;
+
+    const allowedByWhitelist =
+      !whitelistEnabled ||
+      allowedChannelIds.includes(channelId) ||
+      (!!parentChannelId && allowedChannelIds.includes(parentChannelId));
+
+    if (scenesEnabled && isThreadChannel) {
+      const sceneRes = await isSceneActive(guildId, channelId);
+      isActiveSceneThread = sceneRes.ok && sceneRes.data.active;
+    }
+
+    allowRpPrefix = allowedByWhitelist || isActiveSceneThread;
+  }
+
   // Check for RP prefix format: "personaName: message" (lowercase only)
   // This triggers response even without @mention
   let isRpPrefix = false;
   let rpPrefixData: RpPrefixResult | null = null;
 
-  // ALWAYS check for RP prefix, regardless of other triggers
-  console.log(`[RP-CHECK] Message from ${message.author.username}: "${message.content.substring(0, 80)}"`);
-  console.log(`[RP-CHECK] isMentioned=${isMentioned}, isReplyToBot=${isReplyToBot}`);
-
-  // Check RP prefix for ALL messages (not just non-mentioned ones)
-  const personaListForRp = await services.personas.listPersonas();
-  if (personaListForRp.ok) {
-    rpPrefixData = detectRpPrefix(message.content, personaListForRp.data);
-    isRpPrefix = rpPrefixData.isRp;
-    console.log(`[RP-CHECK] isRpPrefix=${isRpPrefix}`);
-    if (rpPrefixData.isRp) {
-      console.log(`[INT] RP prefix detected: user is RPing as ${rpPrefixData.rpAsPersona}`);
+  if (allowRpPrefix) {
+    // Only check for RP prefix when the user explicitly enables full auto-replies.
+    const personaListForRp = await services.personas.listPersonas();
+    if (personaListForRp.ok) {
+      rpPrefixData = detectRpPrefix(message.content, personaListForRp.data);
+      isRpPrefix = rpPrefixData.isRp;
+      if (rpPrefixData.isRp) {
+        console.log(`[INT] RP prefix detected: user is RPing as ${rpPrefixData.rpAsPersona}`);
+      }
+    } else {
+      console.log(`[RP-CHECK] Failed to get persona list:`, personaListForRp.error);
     }
-  } else {
-    console.log(`[RP-CHECK] Failed to get persona list:`, personaListForRp.error);
   }
 
   // TRIGGER RULE: Must have @mention OR reply to bot OR RP prefix format
@@ -302,11 +298,26 @@ export async function execute(message: any, services: any) {
     return;
   }
 
+  // In-flight guard: prevent overlapping replies per user+channel (LLM calls can be slow).
+  const inFlightKey = `${channelId}:${message.author.id}`;
+  const now = Date.now();
+  const inFlightAt = replyInFlight.get(inFlightKey);
+  if (inFlightAt && (now - inFlightAt) < REPLY_IN_FLIGHT_TTL_MS) {
+    logger.debug("[AUTO_REPLY] Skipping: reply already in-flight", {
+      channelId,
+      userId: message.author.id,
+      ageMs: now - inFlightAt,
+    });
+    return;
+  }
+  replyInFlight.set(inFlightKey, now);
+
   try {
     // Determine which persona to use
     let selectedPersona = null;
     let reason = '';
     let rpContext: string | undefined; // Track if user is roleplaying as a character
+    let userMessageForAi = String(message.content ?? "");
 
     if (isReplyToBot && repliedToPersona) {
       // Replying to a specific persona - continue with that persona
@@ -317,6 +328,7 @@ export async function execute(message: any, services: any) {
       // User is RPing as a persona using "personaName:" prefix (lowercase only)
       // Select a DIFFERENT persona to respond (not the one they're RPing as)
       rpContext = `roleplaying_as_${rpPrefixData.rpAsPersona}`;
+      userMessageForAi = rpPrefixData.messageContent;
 
       // Get personas to find a suitable responder
       const personaList = await services.personas.listPersonas();
@@ -363,9 +375,10 @@ export async function execute(message: any, services: any) {
       }
     } else if (isMentioned) {
       // @mentioned - check for persona name in message
-      const contentWithoutMention = message.content
+      const contentWithoutMention = String(message.content ?? "")
         .replace(/<@!?\d+>/g, '') // Remove @mentions
         .trim();
+      userMessageForAi = contentWithoutMention;
 
       // Get all personas and use smart addressee detection
       const personaList = await services.personas.listPersonas();
@@ -471,6 +484,11 @@ export async function execute(message: any, services: any) {
       persona = personaResult.data;
     }
 
+    // If the message contains only the bot mention (e.g., "<@id>"), keep a short placeholder.
+    if (!String(userMessageForAi ?? "").trim()) {
+      userMessageForAi = "(no message)";
+    }
+
     // Get conversation history for this USER+persona in channel (per-user isolation)
     const history = (services.conversationHistory?.getContext(
       message.channelId,
@@ -479,22 +497,10 @@ export async function execute(message: any, services: any) {
       10
     ) || []) as any[];
 
-    // Build context with RAG if available
-    let context = '';
-    try {
-      const ragResult = await services.ai.rag.search({ query: message.content, topK: 3, generateAnswer: false });
-      if (ragResult.ok && ragResult.data.hits && ragResult.data.hits.length > 0) {
-        const hits = ragResult.data.hits as any[];
-        context = hits.map((r) => r.text || r.content).filter(Boolean).join('\n\n');
-      }
-    } catch (error: unknown) {
-      console.error('[ERR] RAG search failed:', getErrorMessage(error));
-    }
-
     // Generate response with persona using ML/statistical models
     const conversationContext = history.slice(-10).map((h) => ({
       role: h.role,
-      content: h.content
+      content: h.content,
     }));
 
     let result: any;
@@ -507,12 +513,49 @@ export async function execute(message: any, services: any) {
     if (llamaAvailable) {
       console.log(`[INT] Using llama.cpp for ${persona.name} (may take 20-30s)`);
 
+      let extraSystemContext: string | undefined;
+      if (scenesEnabled && isActiveSceneThread && message.channel?.isThread?.()) {
+        try {
+          const recent = await message.channel.messages.fetch({ limit: 18 }).catch(() => null);
+          const msgs = recent ? (Array.from(recent.values()) as any[]) : [];
+          const msgsAsc = msgs.slice().reverse();
+          const lines: string[] = [];
+          for (const m of msgsAsc) {
+            if (!m) continue;
+            if (m.id === message.id) continue;
+            if (m?.author?.bot && !m?.webhookId) continue;
+
+            const author =
+              (m?.author?.username ? String(m.author.username) : null) ||
+              (m?.author?.tag ? String(m.author.tag) : null) ||
+              "User";
+            const text = String(m?.cleanContent ?? m?.content ?? "").trim();
+            if (!text) continue;
+            if (/^\s*\/(scene|assistant|help|ai|persona|minigame|greet)\b/i.test(text)) continue;
+            lines.push(`${author}: ${text}`);
+          }
+
+          if (lines.length >= 3) {
+            extraSystemContext =
+              "SCENE CONTEXT (most recent messages in this thread):\n" +
+              lines.slice(-12).join("\n");
+          }
+        } catch (ctxErr: unknown) {
+          logger.debug("[AUTO_REPLY] Failed to build scene context (non-fatal)", {
+            error: getErrorMessage(ctxErr),
+          });
+        }
+      }
+
       // Use llama.cpp with persona's system_prompt
       const llamaResult = await generatePersonaReply(
-        message.content,
+        userMessageForAi,
         persona, // Pass full persona object with system_prompt
         conversationContext,
-        rpContext ? { rpContext } : {} // Pass RP context for roleplay scenarios
+        {
+          ...(rpContext ? { rpContext } : {}),
+          ...(extraSystemContext ? { extraSystemContext } : {}),
+        } // Pass RP + scene context for roleplay scenarios
       );
 
       if (llamaResult.ok) {
@@ -523,7 +566,7 @@ export async function execute(message: any, services: any) {
             strategy: 'llama.cpp',
             tokensPredicted: llamaResult.data.tokensPredicted,
             latencyMs: llamaResult.data.latencyMs,
-          }
+          },
         };
         strategyUsedOverride = 'llama.cpp';
         console.log(`[INT] llama.cpp replied in ${llamaResult.data.latencyMs}ms`);
@@ -534,10 +577,10 @@ export async function execute(message: any, services: any) {
         // Fallback directly to personaLogic (uses training corpus retrieval)
         result = await services.ai.personaLogic.reply({
           persona: persona.name,
-          message: message.content,
+          message: userMessageForAi,
           history: conversationContext,
           topK: 5,
-          maxLen: 80
+          maxLen: 80,
         });
         strategyUsedOverride = 'personaLogic_fallback';
       }
@@ -548,10 +591,10 @@ export async function execute(message: any, services: any) {
       try {
         result = await services.ai.personaLogic.reply({
           persona: persona.name,
-          message: message.content,
+          message: userMessageForAi,
           history: conversationContext,
           topK: 5,
-          maxLen: 80
+          maxLen: 80,
         });
       } catch (personaLogicErr: unknown) {
         const msg = getErrorMessage(personaLogicErr);
@@ -562,7 +605,7 @@ export async function execute(message: any, services: any) {
       // If personaLogic fails, use LOCAL fallback (no external service needed)
       if (!result.ok) {
         console.warn('[WARN] personaLogic failed, using local training data fallback');
-        result = await localPersonaReply(persona.name, message.content, { topK: 5 });
+        result = await localPersonaReply(persona.name, userMessageForAi, { topK: 5 });
         strategyUsedOverride = 'local_fallback';
       }
     }
@@ -611,7 +654,7 @@ export async function execute(message: any, services: any) {
         userId: message.author.id,
         username: message.author.username,
         persona: persona.name,
-        userMessage: message.content,
+        userMessage: userMessageForAi,
         botResponse: responseText,
         responseSource,
         similarity: result.data?.confidence || null,
@@ -626,6 +669,7 @@ export async function execute(message: any, services: any) {
 
     // Send response via webhook to show persona's avatar and name
     try {
+      const mentionPrefix = scenesEnabled && isActiveSceneThread ? "" : `<@${message.author.id}> `;
       await services.webhooks.personaSay(
         message.channelId,
         {
@@ -633,7 +677,7 @@ export async function execute(message: any, services: any) {
           avatar: persona.avatar
         },
         {
-          content: `<@${message.author.id}> ${responseText}`,
+          content: `${mentionPrefix}${responseText}`,
         }
       );
     } catch (webhookError: unknown) {
@@ -648,7 +692,7 @@ export async function execute(message: any, services: any) {
         message.author.id,
         persona.name,
         'user',
-        message.content
+        userMessageForAi
       );
       services.conversationHistory.addMessage(
         message.channelId,
@@ -673,5 +717,7 @@ export async function execute(message: any, services: any) {
     } catch (replyError) {
       console.error('[ERR] Failed to send error reply:', replyError);
     }
+  } finally {
+    replyInFlight.delete(inFlightKey);
   }
 }

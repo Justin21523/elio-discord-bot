@@ -186,6 +186,7 @@ type ConversationMessage = {
 type PersonaReplyOptions = LlamaOptions & {
   rpContext?: string;
   useRag?: boolean;
+  extraSystemContext?: string;
 };
 
 type PersonaRecord = {
@@ -497,7 +498,7 @@ export async function generatePersonaReply(
   let systemPrompt = wrapForDiscordChat(basePrompt, personaName);
 
   // Check if message is a lore query and RAG is enabled
-  const { rpContext, useRag = true } = options;
+  const { rpContext, useRag = true, extraSystemContext } = options;
   let ragContext = "";
   let ragSources: string[] = [];
 
@@ -529,6 +530,19 @@ The person talking to you is ROLEPLAYING as ${rpCharacter}.
       responder: personaName,
       userRoleplaying: rpCharacter,
     });
+  }
+
+  if (extraSystemContext) {
+    const trimmed = String(extraSystemContext).trim();
+    if (trimmed) {
+      const capped =
+        trimmed.length <= 1800 ? trimmed : trimmed.slice(0, 1788) + "\n…(truncated)";
+      systemPrompt += `\n\n---\n${capped}`;
+      logger.debug("[LLAMA] Extra system context added", {
+        persona: personaName,
+        chars: capped.length,
+      });
+    }
   }
 
   // Add RAG context after system prompt

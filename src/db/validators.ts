@@ -176,6 +176,51 @@ export const validators = {
       additionalProperties: true,
     },
   },
+
+  // --- user_chat_settings (per-user chat auto-reply mode, per guild) ---
+  user_chat_settings: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["guildId", "userId", "mode"],
+      properties: {
+        guildId: { bsonType: "string" },
+        userId: { bsonType: "string" },
+        mode: { enum: ["off", "mentions", "full"] },
+        createdAt: { bsonType: ["date", "null"] },
+        updatedAt: { bsonType: ["date", "null"] },
+      },
+      additionalProperties: true,
+    },
+  },
+
+  // --- assistant_scenes (thread-based RP scenes) ---
+  assistant_scenes: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["guildId", "threadId", "active", "createdByUserId", "createdAt"],
+      properties: {
+        guildId: { bsonType: "string" },
+        threadId: { bsonType: "string" },
+        parentChannelId: { bsonType: ["string", "null"] },
+        title: { bsonType: ["string", "null"] },
+        active: { bsonType: "bool" },
+        createdByUserId: { bsonType: "string" },
+        createdAt: { bsonType: "date" },
+        updatedAt: { bsonType: ["date", "null"] },
+        endedAt: { bsonType: ["date", "null"] },
+        endedByUserId: { bsonType: ["string", "null"] },
+        recap: { bsonType: ["string", "null"] },
+        recapStatus: { enum: ["pending", "done", "failed", null] },
+        recapRequestedAt: { bsonType: ["date", "null"] },
+        recapAt: { bsonType: ["date", "null"] },
+        recapModel: { bsonType: ["string", "null"] },
+        recapMessageCount: { bsonType: ["int", "long", "double", "null"] },
+        recapAttempts: { bsonType: ["int", "long", "double", "null"] },
+        recapError: { bsonType: ["string", "null"] },
+      },
+      additionalProperties: true,
+    },
+  },
 };
 
 export type ValidatorCollection = keyof typeof validators;

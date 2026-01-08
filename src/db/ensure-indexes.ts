@@ -139,6 +139,18 @@ export async function ensureIndexes(): Promise<void> {
   await db.collection('privacy_settings').createIndex({ userId: 1, guildId: 1 });
   await db.collection('privacy_settings').createIndex({ requestedDeletion: 1 });
 
+  // guild_config: per-guild feature settings
+  await db.collection('guild_config').createIndex({ guildId: 1 });
+
+  // user_chat_settings: per-user chat auto-reply mode (per guild)
+  await db.collection('user_chat_settings').createIndex({ guildId: 1, userId: 1 }, { unique: true });
+  await db.collection('user_chat_settings').createIndex({ guildId: 1, mode: 1 });
+
+  // assistant_scenes: thread-based RP scenes
+  await db.collection('assistant_scenes').createIndex({ guildId: 1, threadId: 1 }, { unique: true });
+  await db.collection('assistant_scenes').createIndex({ guildId: 1, active: 1, createdAt: -1 });
+  await db.collection('assistant_scenes').createIndex({ guildId: 1, recapStatus: 1, endedAt: -1 });
+
   // social_media_shares: deduplication for social media monitor job
   await db.collection('social_media_shares').createIndex(
     { url: 1, guildId: 1 },

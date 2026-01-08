@@ -7,6 +7,7 @@ export const COOLDOWNS = {
   battleTurnMs: 20000,
   minigameStartMs: 10000,
   inventoryUseMs: 1000,
+  sceneStartMs: 20000,
 } as const;
 
 export type CooldownKey = keyof typeof COOLDOWNS;

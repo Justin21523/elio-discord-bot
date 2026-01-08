@@ -56,10 +56,15 @@ import * as inventoryCmd from "./commands/inventory.js";
 import * as historyCmd from "./commands/history.js";
 import * as privacyCmd from "./commands/privacy.js";
 import * as helpCmd from "./commands/help.js";
+import * as assistantCmd from "./commands/assistant.js";
+import * as configAssistantCmd from "./commands/config-assistant.js";
+import * as sceneCmd from "./commands/scene.js";
 
 // Import event handlers
 import * as messageCreateEvent from "./events/messageCreate.js";
 import * as dmCreateEvent from "./events/dmCreate.js";
+import * as threadUpdateEvent from "./events/threadUpdate.js";
+import * as threadDeleteEvent from "./events/threadDelete.js";
 
 // Pre-import minigame handler (avoid dynamic import latency on button clicks)
 import { handleMinigameButton } from "./handlers/minigameHandlers.js";
@@ -78,6 +83,8 @@ import * as autoStoryWeave from "./jobs/autoStoryWeave.js";
 import * as autoWorldBuilder from "./jobs/autoWorldBuilder.js";
 import { createChannelHistorySyncJob } from "./jobs/channelHistorySync.js";
 import * as socialMediaMonitor from "./jobs/socialMediaMonitor.js";
+import * as sceneCleanup from "./jobs/sceneCleanup.js";
+import * as sceneRecap from "./jobs/sceneRecap.js";
 
 // Validate configuration on startup
 try {
@@ -183,6 +190,9 @@ function buildRouter(): Collection<string, RegisteredCommand> {
     historyCmd as unknown as CommandModule,
     privacyCmd as unknown as CommandModule,
     helpCmd as unknown as CommandModule,
+    assistantCmd as unknown as CommandModule,
+    configAssistantCmd as unknown as CommandModule,
+    sceneCmd as unknown as CommandModule,
   ];
 
   for (const cmd of commands) {
@@ -236,6 +246,8 @@ function registerCronJobs(): void {
   const COSMIC_DIGEST_CRON = process.env.COSMIC_DIGEST_CRON || "0 10 * * *";
   const DAILY_SUMMARY_CRON = process.env.DAILY_SUMMARY_CRON || "0 23 * * *";
   const CONTENT_EXPAND_CRON = process.env.CONTENT_EXPAND_CRON || "0 */6 * * *"; // Every 6 hours
+  const SCENE_CLEANUP_CRON = process.env.SCENE_CLEANUP_CRON || "0 * * * *"; // Hourly
+  const SCENE_RECAP_CRON = process.env.SCENE_RECAP_CRON || "*/10 * * * *"; // Every 10 minutes
 
   // Auto-scenario generation (every 4 hours)
   cron.schedule(SCENARIO_CRON, () => {
@@ -271,6 +283,18 @@ function registerCronJobs(): void {
   cron.schedule("* * * * *", () => {
     logger.debug("[CRON] Running scenario_reveal");
     scenarioReveal.run(client).catch((err) => logger.error("[CRON] scenario_reveal failed", err));
+  });
+
+  // Scene cleanup (hourly): ensure archived/deleted threads don't stay active in DB
+  cron.schedule(SCENE_CLEANUP_CRON, () => {
+    logger.debug("[CRON] Running scene_cleanup");
+    sceneCleanup.run(client).catch((err) => logger.error("[CRON] scene_cleanup failed", err));
+  });
+
+  // Scene recap (every 10m): generate recaps for ended scenes
+  cron.schedule(SCENE_RECAP_CRON, () => {
+    logger.debug("[CRON] Running scene_recap");
+    sceneRecap.run(client).catch((err) => logger.error("[CRON] scene_recap failed", err));
   });
 
   // Auto meme drop (every 6 hours) - PROACTIVE FEATURE
@@ -324,7 +348,7 @@ function registerCronJobs(): void {
     socialMediaMonitor.run(client).catch((err) => logger.error("[CRON] social_media_monitor failed", err));
   });
 
-  logger.info("[BOT] Registered 13 cron jobs (including 6 proactive AI features + channel history)");
+  logger.info("[BOT] Cron jobs registered (including proactive AI + channel history + scene cleanup)");
 }
 
 // 7) Message handler (for both guild messages and DMs)
@@ -353,6 +377,23 @@ client.on(Events.MessageCreate, async (message) => {
     }
   } catch (error: unknown) {
     logger.error("[BOT] MessageCreate event error:", { error: getErrorMessage(error) });
+  }
+});
+
+// Keep scene records in sync with thread lifecycle
+client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
+  try {
+    await threadUpdateEvent.execute(oldThread, newThread);
+  } catch (error: unknown) {
+    logger.warn("[BOT] ThreadUpdate event error (non-fatal)", { error: getErrorMessage(error) });
+  }
+});
+
+client.on(Events.ThreadDelete, async (thread) => {
+  try {
+    await threadDeleteEvent.execute(thread);
+  } catch (error: unknown) {
+    logger.warn("[BOT] ThreadDelete event error (non-fatal)", { error: getErrorMessage(error) });
   }
 });
 

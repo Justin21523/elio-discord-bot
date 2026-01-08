@@ -70,6 +70,16 @@ const COMMAND_CATEGORIES: Record<string, any> = {
         options: "message, persona",
       },
       {
+        name: "/assistant",
+        description: "Control AI auto-replies in chat (off / mentions / full)",
+        options: "status, mode, on, off",
+      },
+      {
+        name: "/scene",
+        description: "Start RP scene threads (safe place for full mode + auto recap)",
+        options: "start, adopt, prompt, end, status, list",
+      },
+      {
         name: "/ai ask",
         description: "Ask a question using RAG (lore-grounded answers)",
         options: "question",
@@ -136,6 +146,10 @@ const COMMAND_CATEGORIES: Record<string, any> = {
       {
         name: "/config-proactive",
         description: "Configure proactive AI features for this server",
+      },
+      {
+        name: "/config-assistant",
+        description: "Configure channel whitelist + scene settings (admin)",
       },
       {
         name: "/scenario create",
@@ -207,6 +221,7 @@ async function showOverview(interaction: any) {
     value:
       "• **New here?** Try `/minigame start type:trivia` to play trivia!\n" +
       "• **Chat with AI:** Mention the bot or use `/ai chat`\n" +
+      "• **Enable auto-replies:** Use `/assistant on` (RP prefix `caleb:` only works in allowed channels or /scene threads)\n" +
       "• **Get help:** Use `/minigame help` for game-specific help\n" +
       "• **Privacy:** Use `/privacy` to manage your data",
     inline: false,
