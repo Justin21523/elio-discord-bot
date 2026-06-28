@@ -41,7 +41,10 @@
     "test:all": "npm run test && npm run test:integration && npm run test:e2e",
     "ingest:rag": "node dist/scripts/ingest-rag.js",
     "test:rag": "node dist/scripts/rag-smoketest.js",
-    "ensure-indexes": "node dist/src/db/ensure-indexes.js"
+    "ensure-indexes": "node dist/src/db/ensure-indexes.js",
+    "demo:dev": "python3 -m http.server 4173 --directory demo-app",
+    "demo:build": "node -e \"require('fs').accessSync('demo-app/index.html')\"",
+    "demo:preview": "python3 -m http.server 4173 --directory demo-app"
   },
   "engines": {
     "node": ">=20.0.0"
