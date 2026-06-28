@@ -6,6 +6,7 @@ const apiTarget = process.env.ADMIN_WEB_API_TARGET || "http://127.0.0.1:3030";
 
 export default defineConfig({
   root: path.resolve(__dirname),
+  base: process.env.VITE_BASE ?? "/",
   plugins: [react()],
   server: {
     port: 5173,
